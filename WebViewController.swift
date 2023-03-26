@@ -3026,7 +3026,8 @@ extension WebViewController: WKUIDelegate
             }
         }
         
-        
+        configuration.userContentController.add(self, name: "iosListener")
+
         return nil
     }
     
@@ -3132,7 +3133,29 @@ extension WebViewController: WKUIDelegate
                                               multiplier: 1,
                                               constant: 0))
     }
+
 }
+
+extension WebViewController: WKScriptMessageHandler {
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "iosListener" && message.body as? String == "ready" {
+            OneSignal.getPermissionSubscriptionState { [weak self] result in
+                if let playerId = result?.subscriptionStatus.userId {
+                    let playerIdSyncScript = """
+                        (function() {
+                            var xhttp = new XMLHttpRequest();
+                            xhttp.open('POST', 'https://tradie.pro/wp-json/onesignal/v1/player-id', true);
+                            xhttp.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+                            xhttp.send(JSON.stringify({ "onesignal_player_id": "\(playerId)" }));
+                        })();
+                    """
+                    self?.webView.evaluateJavaScript(playerIdSyncScript, completionHandler: nil)
+                }
+            }
+        }
+    }
+}
+
 
 
 fileprivate func convertFromAVAudioSessionCategory(_ input: AVAudioSession.Category) -> String {
