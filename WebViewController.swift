@@ -89,7 +89,7 @@ extension String {
 
 
 
-class WebViewController: UIViewController, OSSubscriptionObserver, GADBannerViewDelegate, GADInterstitialDelegate, SKStoreProductViewControllerDelegate,SKProductsRequestDelegate, SKPaymentTransactionObserver, FBInterstitialAdDelegate, WKNavigationDelegate, WKScriptMessageHandler
+class WebViewController: UIViewController, OSSubscriptionObserver, GADBannerViewDelegate, GADInterstitialDelegate, SKStoreProductViewControllerDelegate,SKProductsRequestDelegate, SKPaymentTransactionObserver, FBInterstitialAdDelegate
 {
     @IBOutlet var loadingSign: UIActivityIndicatorView!
     @IBOutlet var offlineImageView: UIImageView!
@@ -414,7 +414,6 @@ class WebViewController: UIViewController, OSSubscriptionObserver, GADBannerView
     override func viewDidLoad()
     {
         super.viewDidLoad()
-
         
         // Check if device is eligible for bottombar feature
         if (bottombar) {
@@ -755,18 +754,7 @@ class WebViewController: UIViewController, OSSubscriptionObserver, GADBannerView
             }
         }
         self.perform(#selector(checkForAlertDisplay), with: nil, afterDelay: 0.5)
-
-        webView.configuration.userContentController.add(self, name: "iosListener")
-        loadWeb()
     }
-
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            if message.name == "iosListener" {
-                if let role = message.body as? String {
-                    OneSignal.sendTag("role", value: role)
-                }
-            }
-        }
     
     func configurePullToRefresh() {
         webView.scrollView.refreshControl = UIRefreshControl()
@@ -1109,28 +1097,6 @@ class WebViewController: UIViewController, OSSubscriptionObserver, GADBannerView
         }
         loadWeb()
     }
-    
-    
-    
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        let jsCode = """
-        fetch('/wp-json/wp/v2/users/me', { credentials: 'include' })
-            .then(response => response.json())
-            .then(user => {
-                if (user.roles && user.roles.includes('job-manager')) {
-                    window.webkit.messageHandlers.iosListener.postMessage('job-manager');
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching user:', error);
-            });
-        """
-
-        webView.evaluateJavaScript(jsCode, completionHandler: { (_, _) in })
-    }
-
-    
-    
     
     func loadWeb()
     {
@@ -2336,7 +2302,6 @@ extension WebViewController: WKNavigationDelegate
                 }
                 
                 let webView = WKWebView(frame: .zero, configuration: config)
-                webView.navigationDelegate = self
                 let alert = UIAlertController(title: "App reset was successful", message: "Thank you.", preferredStyle: UIAlertController.Style.alert)
                 
                 alert.addAction(UIAlertAction(title: "OK", style: UIAlertAction.Style.default, handler: nil))
