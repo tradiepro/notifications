@@ -1776,10 +1776,15 @@ extension WebViewController: WKNavigationDelegate
          })
 
          // Call the new syncOneSignalPlayerId function
-         syncOneSignalPlayerId()
+        syncOneSignalPlayerId()
 
-
-    }
+            let syncPlayerIdScript = """
+                window.addEventListener('load', function() {
+                    window.webkit.messageHandlers.iosListener.postMessage('ready');
+                });
+            """
+            webView.evaluateJavaScript(syncPlayerIdScript, completionHandler: nil)
+        }
     
     
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error)
