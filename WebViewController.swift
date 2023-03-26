@@ -1767,6 +1767,29 @@ extension WebViewController: WKNavigationDelegate
             }
         }
         webView.allowsBackForwardNavigationGestures = enableswipenavigation
+
+        OneSignal.promptForPushNotifications(userResponse: { (accepted: Bool) in
+        print("User accepted notifications: \(accepted)")
+        if accepted {
+            OneSignal.getDeviceState { (deviceState: OSDeviceState?) in
+                if let playerId = deviceState?.userId {
+                    let jsCode = """
+                        (function() {
+                            var playerId = '\(playerId)';
+                            var data = new FormData();
+                            data.append('onesignal_player_id', playerId);
+                            fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', {
+                                method: 'POST',
+                                body: data
+                            });
+                        })();
+                        """
+                    self.webView.evaluateJavaScript(jsCode, completionHandler: nil)
+                }
+            }
+        }
+     })
+
     }
     
     
@@ -2263,32 +2286,6 @@ extension WebViewController: WKNavigationDelegate
             
             if requestURL.absoluteString.hasPrefix("registerpush://")
             {
-                OneSignal.promptForPushNotifications(userResponse: { (accepted: Bool) in
-                    print("User accepted notifications: \(accepted)")
-                    if accepted {
-                        OneSignal.getPermissionSubscriptionState { (status: OSPermissionSubscriptionState?) in
-                            if let playerId = status?.subscriptionStatus.userId {
-                                let jsCode = """
-                                    (function() {
-                                        var playerId = '\(playerId)';
-                                        var data = new FormData();
-                                        data.append('onesignal_player_id', playerId);
-                                        fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', {
-                                            method: 'POST',
-                                            body: data
-                                        });
-                                    })();
-                                    """
-                                webView.evaluateJavaScript(jsCode, completionHandler: nil)
-                            }
-                        }
-                    }
-                })
-
-
-
-
-
                 
                 if #available(iOS 10.0, *)
                 {
