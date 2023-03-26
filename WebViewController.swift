@@ -1767,24 +1767,7 @@ extension WebViewController: WKNavigationDelegate
             }
         }
         webView.allowsBackForwardNavigationGestures = enableswipenavigation
-
-    
-        UIApplication.shared.isNetworkActivityIndicatorVisible = false
-         UIView.animate(withDuration: 0.5, animations: { () -> Void in
-        self.webView.alpha = 1
-         }, completion: { (Bool) -> Void in
-         })
-
-         // Call the new syncOneSignalPlayerId function
-        syncOneSignalPlayerId()
-
-            let syncPlayerIdScript = """
-                window.addEventListener('load', function() {
-                    window.webkit.messageHandlers.iosListener.postMessage('ready');
-                });
-            """
-            webView.evaluateJavaScript(syncPlayerIdScript, completionHandler: nil)
-        }
+    }
     
     
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error)
@@ -1821,23 +1804,6 @@ extension WebViewController: WKNavigationDelegate
             }
         }
     }
-    func syncOneSignalPlayerId() {
-    if let playerId = OneSignal.getDeviceState().userId {
-        let jsCode = """
-            (function() {
-                var playerId = '\(playerId)';
-                var data = new FormData();
-                data.append('onesignal_player_id', playerId);
-                fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', {
-                    method: 'POST',
-                    body: data
-                });
-            })();
-            """
-        webView.evaluateJavaScript(jsCode, completionHandler: nil)
-    }
-    }
-
     @available(iOS 15.0, *)
     func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin, initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
         return origin.host == host ? .grant : .deny
@@ -2297,6 +2263,9 @@ extension WebViewController: WKNavigationDelegate
             
             if requestURL.absoluteString.hasPrefix("registerpush://")
             {
+                OneSignal.promptForPushNotifications(userResponse: { accepted in
+                    print("User accepted notifications: \(accepted)")
+                })
                 
                 if #available(iOS 10.0, *)
                 {
@@ -3026,8 +2995,7 @@ extension WebViewController: WKUIDelegate
             }
         }
         
-        configuration.userContentController.add(self, name: "iosListener")
-
+        
         return nil
     }
     
@@ -3133,29 +3101,7 @@ extension WebViewController: WKUIDelegate
                                               multiplier: 1,
                                               constant: 0))
     }
-
 }
-
-extension WebViewController: WKScriptMessageHandler {
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "iosListener" && message.body as? String == "ready" {
-            OneSignal.getPermissionSubscriptionState { [weak self] result in
-                if let playerId = result?.subscriptionStatus.userId {
-                    let playerIdSyncScript = """
-                        (function() {
-                            var xhttp = new XMLHttpRequest();
-                            xhttp.open('POST', 'https://tradie.pro/wp-json/onesignal/v1/player-id', true);
-                            xhttp.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-                            xhttp.send(JSON.stringify({ "onesignal_player_id": "\(playerId)" }));
-                        })();
-                    """
-                    self?.webView.evaluateJavaScript(playerIdSyncScript, completionHandler: nil)
-                }
-            }
-        }
-    }
-}
-
 
 
 fileprivate func convertFromAVAudioSessionCategory(_ input: AVAudioSession.Category) -> String {
@@ -3546,3 +3492,4 @@ func UIOrientationIsPortrait() -> Bool {
     }
     return false
 }
+
