@@ -1768,27 +1768,15 @@ extension WebViewController: WKNavigationDelegate
         }
         webView.allowsBackForwardNavigationGestures = enableswipenavigation
 
-        OneSignal.promptForPushNotifications { (accepted) in
-            print("User accepted notifications: \(accepted)")
-            if accepted {
-                OneSignal.getDeviceState { (deviceState) in
-                    if let playerId = deviceState.userId {
-                        let jsCode = """
-                            (function() {
-                                var playerId = '\(playerId)';
-                                var data = new FormData();
-                                data.append('onesignal_player_id', playerId);
-                                fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', {
-                                    method: 'POST',
-                                    body: data
-                                });
-                            })();
-                            """
-                        self.webView.evaluateJavaScript(jsCode, completionHandler: nil)
-                    }
-                }
-            }
-        }
+    
+        UIApplication.shared.isNetworkActivityIndicatorVisible = false
+         UIView.animate(withDuration: 0.5, animations: { () -> Void in
+        self.webView.alpha = 1
+         }, completion: { (Bool) -> Void in
+         })
+
+         // Call the new syncOneSignalPlayerId function
+         syncOneSignalPlayerId()
 
 
     }
@@ -1828,6 +1816,23 @@ extension WebViewController: WKNavigationDelegate
             }
         }
     }
+    func syncOneSignalPlayerId() {
+    if let playerId = OneSignal.getDeviceState().userId {
+        let jsCode = """
+            (function() {
+                var playerId = '\(playerId)';
+                var data = new FormData();
+                data.append('onesignal_player_id', playerId);
+                fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', {
+                    method: 'POST',
+                    body: data
+                });
+            })();
+            """
+        webView.evaluateJavaScript(jsCode, completionHandler: nil)
+    }
+    }
+
     @available(iOS 15.0, *)
     func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin, initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
         return origin.host == host ? .grant : .deny
