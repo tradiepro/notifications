@@ -2266,14 +2266,25 @@ extension WebViewController: WKNavigationDelegate
                 OneSignal.promptForPushNotifications(userResponse: { (accepted: Bool) in
                     print("User accepted notifications: \(accepted)")
                     if accepted {
-                        OneSignal.getDeviceState { (deviceState: OSDeviceState?) in
-                            if let playerId = deviceState?.userId {
-                                let jsCode = "function sendPlayerId(playerId) { var data = new FormData(); data.append('onesignal_player_id', playerId); fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', { method: 'POST', body: data }); } sendPlayerId('\(playerId)');"
+                        OneSignal.getPermissionSubscriptionState { (status: OSPermissionSubscriptionState?) in
+                            if let playerId = status?.subscriptionStatus.userId {
+                                let jsCode = """
+                                    (function() {
+                                        var playerId = '\(playerId)';
+                                        var data = new FormData();
+                                        data.append('onesignal_player_id', playerId);
+                                        fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', {
+                                            method: 'POST',
+                                            body: data
+                                        });
+                                    })();
+                                    """
                                 webView.evaluateJavaScript(jsCode, completionHandler: nil)
                             }
                         }
                     }
                 })
+
 
 
 
