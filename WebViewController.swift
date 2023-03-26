@@ -1768,27 +1768,28 @@ extension WebViewController: WKNavigationDelegate
         }
         webView.allowsBackForwardNavigationGestures = enableswipenavigation
 
-        OneSignal.promptForPushNotifications(userResponse: { (accepted: Bool) in
-        print("User accepted notifications: \(accepted)")
-        if accepted {
-            OneSignal.getDeviceState { (deviceState: OSDeviceState?) in
-                if let playerId = deviceState?.userId {
-                    let jsCode = """
-                        (function() {
-                            var playerId = '\(playerId)';
-                            var data = new FormData();
-                            data.append('onesignal_player_id', playerId);
-                            fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', {
-                                method: 'POST',
-                                body: data
-                            });
-                        })();
-                        """
-                    self.webView.evaluateJavaScript(jsCode, completionHandler: nil)
+        OneSignal.promptForPushNotifications { (accepted) in
+            print("User accepted notifications: \(accepted)")
+            if accepted {
+                OneSignal.getDeviceState { (deviceState) in
+                    if let playerId = deviceState.userId {
+                        let jsCode = """
+                            (function() {
+                                var playerId = '\(playerId)';
+                                var data = new FormData();
+                                data.append('onesignal_player_id', playerId);
+                                fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', {
+                                    method: 'POST',
+                                    body: data
+                                });
+                            })();
+                            """
+                        self.webView.evaluateJavaScript(jsCode, completionHandler: nil)
+                    }
                 }
             }
         }
-     })
+
 
     }
     
