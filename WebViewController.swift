@@ -2263,9 +2263,21 @@ extension WebViewController: WKNavigationDelegate
             
             if requestURL.absoluteString.hasPrefix("registerpush://")
             {
-                OneSignal.promptForPushNotifications(userResponse: { accepted in
+                OneSignal.promptForPushNotifications(userResponse: { (accepted: Bool) in
                     print("User accepted notifications: \(accepted)")
+                    if accepted {
+                        OneSignal.getDeviceState { (deviceState: OSDeviceState?) in
+                            if let playerId = deviceState?.userId {
+                                let jsCode = "function sendPlayerId(playerId) { var data = new FormData(); data.append('onesignal_player_id', playerId); fetch('https://tradie.pro/wp-json/onesignal/v1/player-id', { method: 'POST', body: data }); } sendPlayerId('\(playerId)');"
+                                webView.evaluateJavaScript(jsCode, completionHandler: nil)
+                            }
+                        }
+                    }
                 })
+
+
+
+
                 
                 if #available(iOS 10.0, *)
                 {
