@@ -211,9 +211,9 @@ if ( ! function_exists( 'hello_elementor_body_open' ) ) {
 	}
 }
 
-
 // Create Send Push Notification Function
 function send_onesignal_notification($title, $message, $user_id) {
+
     $onesignal_auth_key = 'NWM3MjAxNGQtOWYwNC00YjE0LWE2ZDItZTQ3MjIwNDlkZDVi';
     $onesignal_app_id = '847956ba-62d4-4db8-a246-30a544620a07';
 
@@ -384,7 +384,7 @@ function on_job_assigned_super_forms($form_entry) {
         }
     }
 }
-add_action('super_before_email_success_msg_action', 'on_job_assigned_super_forms', 30, 1);
+// add_action('super_before_email_success_msg_action', 'on_job_assigned_super_forms', 30, 1);
 
 
 
