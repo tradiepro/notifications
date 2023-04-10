@@ -211,9 +211,9 @@ if ( ! function_exists( 'hello_elementor_body_open' ) ) {
 	}
 }
 
+
 // Create Send Push Notification Function
 function send_onesignal_notification($title, $message, $user_id) {
-
     $onesignal_auth_key = 'NWM3MjAxNGQtOWYwNC00YjE0LWE2ZDItZTQ3MjIwNDlkZDVi';
     $onesignal_app_id = '847956ba-62d4-4db8-a246-30a544620a07';
 
@@ -248,12 +248,6 @@ function send_onesignal_notification($title, $message, $user_id) {
 
     return $response;
 }
-
-
-
-
-
-
 
 
 // Send Push Notification to all Users with role "job-manager" - On new "Pending" job by Super Forms
@@ -298,12 +292,6 @@ add_action('super_before_email_success_msg_action', 'on_form_submitted', 20, 1);
 
 
 
-
-
-
-
-
-
 // Send notification to Assigned Tradie - After job gets updated by WP backend
 function on_job_assigned($post_id) {
     // Check if the post type is 'tp-job'
@@ -329,18 +317,12 @@ function on_job_assigned($post_id) {
 }
 add_action('acf/save_post', 'on_job_assigned', 20);
 
-
-
-
-
-
-
 // Send notification to Assigned Tradie - After job gets updated - Super Form ID 16678
 function on_job_assigned_super_forms($form_entry) {
     // Check if the form ID is 16678
     if ($form_entry['form_id'] == 16678) {
 
-        // Get the tradie_id and current_post_identity field values
+        // Get the tradie_id and job_id field values
         $tradie_id = '';
         $job_id = '';
         foreach ($form_entry['data'] as $key => $field) {
@@ -352,28 +334,28 @@ function on_job_assigned_super_forms($form_entry) {
             }
         }
 
-        // If the tradie_id and job_id are set, update the author and job_status
+        // If the tradie_id and job_id are set, update the job and send the notification
         if (!empty($tradie_id) && !empty($job_id)) {
-            // Update job author
-            $job_data = array(
-                'ID'          => $job_id,
-                'post_author' => $tradie_id,
-            );
-            wp_update_post($job_data);
-
-            // Update job_status custom field
-            update_post_meta($job_id, 'job_status', 'Pending Tradie Approval');
-
-            // Send the notification
             $tradie = get_user_by('ID', $tradie_id);
-            if ($tradie) {
-                $post_id = intval($form_entry['post_id']);
-                $post = get_post($post_id);
+            $job_post = get_post($job_id);
 
+            if ($tradie && $job_post) {
+                // Update the job's author and job status
+                $job_post_args = array(
+                    'ID' => $job_id,
+                    'post_author' => $tradie_id,
+                );
+                wp_update_post($job_post_args);
+                update_field('job_status', 'Pending Tradie Approval', $job_id);
+
+                // Refresh the job post object after updating
+                $job_post = get_post($job_id);
+
+                // Send the notification to the tradie
                 $push_id = get_user_meta($tradie_id, 'onesignal_push_id', true);
                 if (!empty($push_id)) {
                     $title = 'New Job Assigned';
-                    $message = "You've been assigned to a new job: " . $post->post_title;
+                    $message = "You've been assigned to a new job: " . $job_post->post_title;
                     try {
                         send_onesignal_notification($title, $message, $tradie_id);
                     } catch (Exception $e) {
@@ -384,118 +366,128 @@ function on_job_assigned_super_forms($form_entry) {
         }
     }
 }
-// add_action('super_before_email_success_msg_action', 'on_job_assigned_super_forms', 30, 1);
+add_action('super_before_email_success_msg_action', 'on_job_assigned_super_forms', 30, 1);
 
-
-
-
-
-// Update Job depending on Tradie Decision
-function update_job_on_decision($form_entry) {
+// Push Notification for all Job Managers After Tradie Decision - Super Form ID 17249
+function on_job_decision_form_submitted($form_entry) {
+    // Check if the form ID is 17249
     if ($form_entry['form_id'] == 17249) {
-        // Get the necessary fields
+
+        // Get the job decision field value
         $job_decision = '';
-        $post_id = '';
+        $job_id = '';
         $proposed_date = '';
+
         foreach ($form_entry['data'] as $key => $field) {
             if ($field['name'] === 'job_decision') {
                 $job_decision = $field['value'];
             } elseif ($field['name'] === 'current_post_identity') {
-                $post_id = intval($field['value']);
+                $job_id = intval($field['value']);
             } elseif ($field['name'] === 'proposed_date') {
                 $proposed_date = $field['value'];
             }
         }
 
-        if (!empty($job_decision) && !empty($post_id)) {
-            // Update the job depending on the decision
-            switch ($job_decision) {
-                case 'Accept job':
-                    update_post_meta($post_id, 'job_status', 'In progress');
-                    break;
-                case 'Reject job':
-                    update_post_meta($post_id, 'job_status', 'Pending');
-                    wp_update_post([
-                        'ID' => $post_id,
-                        'post_author' => 991 // Job manager ID
-                    ]);
-                    break;
-                case 'Propose another date':
-                    update_post_meta($post_id, 'job_status', 'Pending Admin Approval');
-                    update_post_meta($post_id, 'tradie_proposed_date', $proposed_date);
-                    break;
-            }
-        }
-    }
-}
-add_action('super_before_email_success_msg_action', 'update_job_on_decision', 41, 1);
-
-
-// Push Notification for all Job Managers After Tradie Decision - Super Form ID 17249
-function send_job_decision_notifications($form_entry) {
-    if ($form_entry['form_id'] == 17249) {
-        // Get the job decision field value
-        $job_decision = '';
-        $tradie_id = '';
-        foreach ($form_entry['data'] as $key => $field) {
-            if ($field['name'] === 'job_decision') {
-                $job_decision = $field['value'];
-            }
-            if ($field['name'] === 'tradie_id') {
-                $tradie_id = $field['value'];
-            }
-        }
-
-        // If the job decision is set, send the notification
+        // If the job decision is set, update the job and send the notification
         if (!empty($job_decision)) {
+
             // Set the title and message depending on the job decision
             switch ($job_decision) {
                 case 'Accept job':
                     $title = 'Job Accepted';
                     $message = 'The tradie has accepted the job.';
+                    update_field('job_status', 'In progress', $job_id);
                     break;
                 case 'Reject job':
                     $title = 'Job Rejected';
                     $message = 'The tradie has rejected the job.';
+                    update_field('job_status', 'Pending', $job_id);
+                    wp_update_post(array('ID' => $job_id, 'post_author' => 991));
                     break;
                 case 'Propose another date':
                     $title = 'New Date Proposed';
                     $message = 'The tradie has proposed a new date for the job.';
+                    update_field('job_status', 'Pending Admin Approval', $job_id);
+                    update_field('tradie_proposed_date', $proposed_date, $job_id);
                     break;
             }
 
-            // Send notification to all job-managers, excluding the tradie who made the decision
+            // Send notification to all job-managers
             $job_managers = get_users(array('role' => 'job-manager'));
             foreach ($job_managers as $job_manager) {
-                if ($job_manager->ID != $tradie_id) {
-                    $push_id = get_user_meta($job_manager->ID, 'onesignal_push_id', true);
-                    if (!empty($push_id)) {
-                        try {
-                            send_onesignal_notification($title, $message, $job_manager->ID);
-                        } catch (Exception $e) {
-                            error_log('Error in send_job_decision_notifications: ' . $e->getMessage());
-                        }
+                $push_id = get_user_meta($job_manager->ID, 'onesignal_push_id', true);
+                if (!empty($push_id)) {
+                    try {
+                        send_onesignal_notification($title, $message, $job_manager->ID);
+                    } catch (Exception $e) {
+                        error_log('Error in on_job_decision_form_submitted: ' . $e->getMessage());
                     }
                 }
             }
         }
     }
 }
-add_action('super_before_email_success_msg_action', 'send_job_decision_notifications', 42, 1);
-
-
-
-
-
+add_action('super_before_email_success_msg_action', 'on_job_decision_form_submitted', 40, 1);
 
 
 // Push notification to Tradie after Job Manager Decision of Proposed Date - Super Form ID 17303
+function on_proposed_date_decision($form_entry) {
+    // Check if the form ID is 17303
+    if ($form_entry['form_id'] == 17303) {
 
+        // Get the job_decision, tradie_id, and job_id field values
+        $job_decision = '';
+        $tradie_id = '';
+        $job_id = '';
+        foreach ($form_entry['data'] as $key => $field) {
+            if ($field['name'] === 'job_decision') {
+                $job_decision = $field['value'];
+            } elseif ($field['name'] === 'tradie_id') {
+                $tradie_id = $field['value'];
+            } elseif ($field['name'] === 'current_post_identity') {
+                $job_id = $field['value'];
+            }
+        }
 
+        // Update the job status depending on the job_decision
+        if ($job_decision === 'Accept new date') {
+            update_field('job_status', 'In progress', $job_id);
+        } elseif ($job_decision === 'Reject new date') {
+            update_field('job_status', 'Pending', $job_id);
+            wp_update_post(array(
+                'ID' => $job_id,
+                'post_author' => 991
+            ));
+        }
 
+        // If the tradie_id is set, send the notification
+        if (!empty($tradie_id)) {
+            $tradie = get_user_by('ID', $tradie_id);
+            if ($tradie) {
 
+                $push_id = get_user_meta($tradie_id, 'onesignal_push_id', true);
+                if (!empty($push_id)) {
+                    $title = '';
+                    $message = '';
+                    if ($job_decision === 'Accept new date') {
+                        $title = 'New Date Accepted';
+                        $message = "Your proposed date has been accepted. Please be on time, thank you.";
+                    } elseif ($job_decision === 'Reject new date') {
+                        $title = 'New Date Rejected';
+                        $message = "Your proposed date for job has been rejected. We will notify you with new jobs.";
+                    }
 
-
+                    try {
+                        send_onesignal_notification($title, $message, $tradie_id);
+                    } catch (Exception $e) {
+                        error_log('Error in on_proposed_date_decision: ' . $e->getMessage());
+                    }
+                }
+            }
+        }
+    }
+}
+add_action('super_before_email_success_msg_action', 'on_proposed_date_decision', 50, 1);
 
 
 // Send notification to all Users with role "job-manager" - After job gets completed by Tradie
@@ -521,6 +513,12 @@ function on_job_completed($form_entry) {
             }
         }
 
+        // Update the job status and tradie cost
+        $job_status = 'Completed by Tradie';
+        $tradie_cost = $job_cost;
+        update_field('job_status', $job_status, $post_id);
+        update_field('tradie_cost', $tradie_cost, $post_id);
+
         // Send notification to all job-managers
         $job_managers = get_users(array('role' => 'job-manager'));
         foreach ($job_managers as $job_manager) {
@@ -538,9 +536,6 @@ function on_job_completed($form_entry) {
     }
 }
 add_action('super_before_email_success_msg_action', 'on_job_completed', 30, 1);
-
-
-
 
 // Push notification to Tradie after Job Manager Completes the Job - Super Form ID 17569
 function on_job_completed_by_admin($form_entry) {
@@ -567,6 +562,22 @@ function on_job_completed_by_admin($form_entry) {
         $tradie = get_user_by('ID', $tradie_id);
         $tradie_name = get_field('business_name', 'user_'.$tradie_id);
 
+        // Update the job status and total cost ACF field
+        $job = get_post($post_id);
+        if ($job) {
+            // Update job status to "Completed"
+            update_post_meta($post_id, 'job_status', 'Completed');
+
+            // Update job total cost ACF field
+            foreach ($form_entry['data'] as $key => $field) {
+                if ($field['name'] === 'total_job_admin') {
+                    $total_cost = $field['value'];
+                    update_field('total_cost', $total_cost, $post_id);
+                    break;
+                }
+            }
+        }
+
         // Send notification to the tradie who completed the job
         $push_id = get_user_meta($tradie_id, 'onesignal_push_id', true);
         if (!empty($push_id)) {
@@ -581,11 +592,6 @@ function on_job_completed_by_admin($form_entry) {
     }
 }
 add_action('super_before_email_success_msg_action', 'on_job_completed_by_admin', 30, 1);
-
-
-
-
-
 
 
 // Show number of jobs for Tradies - By Status Parameter 
@@ -667,62 +673,10 @@ function custom_job_count_shortcode( $atts ) {
 }
 add_shortcode( 'job_count', 'custom_job_count_shortcode' );
 
-// Extend user session by setting a custom expiration time for authentication cookies
-add_action('set_current_user', '_super_set_current_user', 10); 
-function _super_set_current_user(){ 
-    $user_id = get_current_user_id(); 
-    if($user_id==0) return; 
-    if(empty($_POST['data'])) return; 
-    $data = array(); 
-    $data = wp_unslash($_POST['data']); 
-    $data = json_decode($data, true); 
-    $data = wp_slash($data); 
-    if(empty($data['onesignal_push_id'])) return; 
-    $onesignal_push_id = $data['onesignal_push_id']['value']; 
-    // Update user meta 
-    update_user_meta($user_id, 'onesignal_push_id', $onesignal_push_id); 
-}
 
-// Redirect Logged in user to My Jobs
-function redirect_users() {
-    if ( is_page( 'login' ) ) {
-        if ( is_user_logged_in() ) {
-            wp_redirect( 'https://tradie.pro/my-jobs/' ); // replace with your dashboard URL
-            exit;
-        }
-    }
-}
- add_action('template_redirect', 'redirect_users');
+// Update One Signal Push ID for Users
 
-// Redirect Logged out user to Login
-function redirect_logged_out_users() {
-    $restricted_page_ids = array(20907, 16813, 20060, 20907, 20197, 20152, 20107);
 
-    if ( ! is_user_logged_in() && is_page( $restricted_page_ids ) ) {
-        wp_redirect( 'https://tradie.pro/login/' );
-        exit;
-    }
-}
-add_action('template_redirect', 'redirect_logged_out_users');
-
-// Get One Signal ID From URL 
-function update_onesignal_push_id() {
-    // Check if the user is logged in
-    if ( is_user_logged_in() ) {
-        // Get the current user
-        $user = wp_get_current_user();
-
-        // Check if the URL contains the 'onesignal_push_id' parameter
-        if ( isset( $_GET['onesignal_push_id'] ) ) {
-            // Get the onesignal_push_id from the URL
-            $onesignal_push_id = sanitize_text_field( $_GET['onesignal_push_id'] );
-
-            // Update the user's custom field with the onesignal_push_id value
-            update_user_meta( $user->ID, 'onesignal_push_id', $onesignal_push_id );
-        }
-    }
-}
-add_action('init', 'update_onesignal_push_id');
 
 // Remove WP Bar from all users
 function remove_admin_bar_for_non_admins() {
@@ -737,6 +691,39 @@ function custom_logout_url() {
     return wp_logout_url( home_url( '/login/' ) );
 }
 add_shortcode( 'custom_logout_url', 'custom_logout_url' );
+
+// Get One Signal ID From URL 
+function update_user_onesignal_push_id($user_login, $user) {
+    $user_id = $user->ID;
+    $url = $_SERVER['REQUEST_URI'];
+    if (strpos($url, 'onesignal_push_id=') !== false) {
+        $push_id = $_GET['onesignal_push_id'];
+        update_user_meta($user_id, 'onesignal_push_id', $push_id);
+    }
+}
+add_action('wp_login', 'update_user_onesignal_push_id', 10, 2);
+
+// Redirect Logged in user to My Jobs
+function redirect_users() {
+    if ( is_page( 'login' ) ) {
+        if ( is_user_logged_in() ) {
+            wp_redirect( 'https://tradie.pro/my-jobs/' ); // replace with your dashboard URL
+            exit;
+        }
+    }
+}
+// add_action('template_redirect', 'redirect_users');
+
+// Redirect Logged out user to Login
+function redirect_logged_out_users() {
+    $restricted_page_ids = array(20907, 16813, 20060, 20907, 20197, 20152, 20107);
+
+    if ( ! is_user_logged_in() && is_page( $restricted_page_ids ) ) {
+        wp_redirect( 'https://tradie.pro/login/' );
+        exit;
+    }
+}
+add_action('template_redirect', 'redirect_logged_out_users');
 
 // Shortcode for Tradies Earnings
 function tp_job_earnings() {
@@ -787,7 +774,7 @@ function tp_all_jobs_earnings() {
     if ($jobs->have_posts()) {
         while ($jobs->have_posts()) {
             $jobs->the_post();
-            $total_cost = (float)get_field('total_cost', get_the_ID());
+            $total_cost = (float)get_post_meta(get_the_ID(), 'total_cost', true);
             $total_earnings += $total_cost;
         }
         wp_reset_postdata();
@@ -796,6 +783,9 @@ function tp_all_jobs_earnings() {
     return 'Total earnings for all jobs: $' . number_format($total_earnings, 2);
 }
 add_shortcode('tp_all_jobs_earnings', 'tp_all_jobs_earnings');
+
+
+
 
 // Shortcode for Logged in User Role Name
 function get_role_display_name($role_slug) {
@@ -816,4 +806,28 @@ function display_user_role_name() {
     return '';
 }
 add_shortcode('user_role_name', 'display_user_role_name');
+
+// Push Custom Notification to Specific User
+function send_notification_on_form_submit($entry_data) {
+    // Check if form ID is 22219
+    if ($entry_data['form_id'] == 22219) {
+        // Get user push ID and message from form data
+        $push_id = $entry_data['data']['onesignal_push_id'];
+        $message = $entry_data['data']['message'];
+        $title = $entry_data['data']['title'];
+
+        // Send notification to user with push ID
+        if (!empty($push_id)) {
+            $notification_title = $title;
+            $notification_message = $message;
+            try {
+                send_onesignal_notification($notification_title, $notification_message, $push_id);
+            } catch (Exception $e) {
+                error_log('Error in send_notification_on_form_submit: ' . $e->getMessage());
+            }
+        }
+    }
+}
+add_action('super_after_submission', 'send_notification_on_form_submit', 5, 1);
+
 
