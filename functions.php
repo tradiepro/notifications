@@ -250,6 +250,8 @@ function send_onesignal_notification($title, $message, $user_id) {
 }
 
 
+
+
 // Send Push Notification to all Users with role "job-manager" - On new "Pending" job by Super Forms
 function on_form_submitted($atts) {
     // List of form IDs that should trigger the notification
@@ -261,11 +263,23 @@ function on_form_submitted($atts) {
         // Retrieve the post title and job_status from the form data
         $post_title = '';
         $job_status = '';
+        $job_title = '';
+        $suburb_name = '';
+        $date = '';
+        $time = '';
         foreach ($atts['data'] as $key => $field) {
             if ($field['name'] === 'post_title') {
                 $post_title = $field['value'];
             } elseif ($field['name'] === 'job_status') {
                 $job_status = $field['value'];
+            } elseif ($field['name'] === 'job_title') {
+                $job_title = $field['value'];
+            } elseif ($field['name'] === 'suburb_name') {
+                $suburb_name = $field['value'];
+            } elseif ($field['name'] === 'date') {
+                $date = $field['value'];
+            } elseif ($field['name'] === 'time') {
+                $time = $field['value'];
             }
         }
 
@@ -277,7 +291,7 @@ function on_form_submitted($atts) {
                 $push_id = get_user_meta($job_manager->ID, 'onesignal_push_id', true);
                 if (!empty($push_id)) {
                     $title = 'New Job Alert';
-                    $message = 'A new job has been posted: ' . $post_title;
+                    $message = 'A new job has been posted: ' . $job_title . ' in ' . $suburb_name . ' on ' . $date . ' - ' . $time;
                     try {
                         send_onesignal_notification($title, $message, $job_manager->ID);
                     } catch (Exception $e) {
@@ -289,7 +303,6 @@ function on_form_submitted($atts) {
     }
 }
 add_action('super_before_email_success_msg_action', 'on_form_submitted', 20, 1);
-
 
 
 // Send notification to Assigned Tradie - After job gets updated by WP backend
@@ -806,28 +819,3 @@ function display_user_role_name() {
     return '';
 }
 add_shortcode('user_role_name', 'display_user_role_name');
-
-// Push Custom Notification to Specific User
-function send_notification_on_form_submit($entry_data) {
-    // Check if form ID is 22219
-    if ($entry_data['form_id'] == 22219) {
-        // Get user push ID and message from form data
-        $push_id = $entry_data['data']['onesignal_push_id'];
-        $message = $entry_data['data']['message'];
-        $title = $entry_data['data']['title'];
-
-        // Send notification to user with push ID
-        if (!empty($push_id)) {
-            $notification_title = $title;
-            $notification_message = $message;
-            try {
-                send_onesignal_notification($notification_title, $notification_message, $push_id);
-            } catch (Exception $e) {
-                error_log('Error in send_notification_on_form_submit: ' . $e->getMessage());
-            }
-        }
-    }
-}
-add_action('super_after_submission', 'send_notification_on_form_submit', 5, 1);
-
-
