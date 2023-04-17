@@ -838,9 +838,6 @@ function tp_all_jobs_earnings() {
 }
 add_shortcode('tp_all_jobs_earnings', 'tp_all_jobs_earnings');
 
-
-
-
 // Shortcode for Logged in User Role Name
 function get_role_display_name($role_slug) {
     $wp_roles = wp_roles();
@@ -952,3 +949,114 @@ function create_quotations_post_type() {
 }
 
 add_action( 'init', 'create_quotations_post_type', 0 );
+
+// Replace Tax with GST on checkout
+add_filter( 'gettext', 'change_tax_to_gst', 20, 3 );
+function change_tax_to_gst( $translated_text, $text, $domain ) {
+    if ( $text === 'Tax' && $domain === 'woocommerce' ) {
+        $translated_text = 'GST';
+    }
+    return $translated_text;
+}
+// Add heading above Payment
+add_action( 'woocommerce_review_order_before_payment', 'add_pay_securely_heading', 10 );
+function add_pay_securely_heading() {
+    echo '<h6 class="custom-head-checkout">Pay Securely</h6>';
+}
+// Change Checkout button depending on payment
+add_filter( 'woocommerce_order_button_text', 'change_checkout_button_text' );
+function change_checkout_button_text( $button_text ) {
+    $cart_items = WC()->cart->get_cart();
+    $product_id_1 = 22511; 
+    $product_id_2 = 22510; 
+    foreach ( $cart_items as $item ) {
+        if ( $item['product_id'] == $product_id_1 ) {
+            $button_text = __( 'Confirm Booking', 'woocommerce' );
+            break;
+        } else if ( $item['product_id'] == $product_id_2 ) {
+            $button_text = __( 'Complete Payment', 'woocommerce' );
+            break;
+        }
+    }
+    return $button_text;
+}
+
+// Update Quotation Status after Payment
+function update_quotation_status( $order_id ) {
+    // Get the order object
+    $order = wc_get_order( $order_id );
+
+    // Get the product ID
+    $product_id = reset( $order->get_items() )['product_id'];
+
+    // Check if the product ID matches
+    if ( $product_id == 22511 ) {
+        // Get the billing job ID from the order meta
+        $job_id = $order->get_meta( 'billing_job_id' );
+
+        // Find the quotation post with matching job ID
+        $quotation_query = new WP_Query(
+            array(
+                'post_type' => 'tp-quotation',
+                'meta_key' => 'job_id',
+                'meta_value' => $job_id,
+                'meta_compare' => '=',
+                'posts_per_page' => 1,
+            )
+        );
+
+        // Update the quotation status to "Deposit paid"
+        if ( $quotation_query->have_posts() ) {
+            $quotation_post = $quotation_query->posts[0];
+            update_post_meta( $quotation_post->ID, 'quotation_status', 'Deposit paid' );
+        }
+    } elseif ( $product_id == 22510 ) {
+        // Get the billing job ID from the order meta
+        $job_id = $order->get_meta( 'billing_job_id' );
+
+        // Find the quotation post with matching job ID
+        $quotation_query = new WP_Query(
+            array(
+                'post_type' => 'tp-quotation',
+                'meta_key' => 'job_id',
+                'meta_value' => $job_id,
+                'meta_compare' => '=',
+                'posts_per_page' => 1,
+            )
+        );
+
+        // Update the quotation status to "Payment completed"
+        if ( $quotation_query->have_posts() ) {
+            $quotation_post = $quotation_query->posts[0];
+            update_post_meta( $quotation_post->ID, 'quotation_status', 'Payment completed' );
+        }
+    }
+}
+add_action( 'woocommerce_order_status_completed', 'update_quotation_status', 10, 1 );
+
+// Hide Deposit due & Remaining on Complete Payment checkout
+add_filter( 'woocommerce_checkout_fields', 'show_hide_checkout_fields' );
+function show_hide_checkout_fields( $fields ) {
+    // Get cart items
+    $cart_items = WC()->cart->get_cart();
+
+    // Check if cart has product with id = 22511
+    $has_deposit_product = false;
+    foreach ( $cart_items as $item ) {
+        if ( $item['product_id'] == 22511 ) {
+            $has_deposit_product = true;
+            break;
+        }
+    }
+
+    // Show/hide fields based on cart content
+    if ( $has_deposit_product ) {
+        $fields['billing']['billing_due']['required'] = true;
+        $fields['billing']['billing_remaining']['required'] = true;
+    } else {
+        unset( $fields['billing']['billing_due'] );
+        unset( $fields['billing']['billing_remaining'] );
+    }
+
+    return $fields;
+}
