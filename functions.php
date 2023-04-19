@@ -542,6 +542,111 @@ function on_proposed_date_decision($form_entry) {
 }
 add_action('super_before_email_success_msg_action', 'on_proposed_date_decision', 50, 1);
 
+// Update Job Prices after Job Quotation submitted
+function update_tp_job_post_meta($form_entry) {
+    // Check if the form ID is 22490
+    if ($form_entry['form_id'] == 22490) {
+        // Get the form data
+        $tradie_cost = '';
+        $platform_fee = '';
+        $total_job_cost = '';
+        $remaining_amount = '';
+        $deposit_client = '';
+        $quotation_id = '';
+        $post_identity = '';
+        foreach ($form_entry['data'] as $field) {
+            if ($field['name'] === 'tradie_cost') {
+                $tradie_cost = $field['value'];
+            } elseif ($field['name'] === 'platform_fee') {
+                $platform_fee = $field['value'];
+            } elseif ($field['name'] === 'total_job_cost') {
+                $total_job_cost = $field['value'];
+            } elseif ($field['name'] === 'remaining_amount') {
+                $remaining_amount = $field['value'];
+            } elseif ($field['name'] === 'deposit_client') {
+                $deposit_client = $field['value'];
+            } elseif ($field['name'] === 'quotation_id') {
+                $quotation_id = $field['value'];
+            } elseif ($field['name'] === 'post_identity') {
+                $post_identity = $field['value'];
+            } elseif ($field['name'] === 'job_id') {
+                $job_id = $field['value'];
+            } elseif ($field['name'] === 'post_title') {
+                $quotation_code = $field['value'];
+            }
+        }
+
+        // Check if the post identity is set
+        if (!empty($post_identity)) {
+            // Get the job post by the post ID
+            $job_post = get_post($post_identity);
+            // Check if the post is a tp-job custom post type
+            if ($job_post && $job_post->post_type === 'tp-job') {
+                // Update the post meta fields
+                update_post_meta($job_post->ID, 'tradie_cost', $tradie_cost);
+                update_post_meta($job_post->ID, 'platform_fee', $platform_fee);
+                update_post_meta($job_post->ID, 'total_cost', $total_job_cost);
+                update_post_meta($job_post->ID, 'remaining_amount', $remaining_amount);
+                update_post_meta($job_post->ID, 'deposit_fee', $deposit_client);
+                update_post_meta($job_post->ID, 'quotation_id', $quotation_id);
+
+                // Update quotation_id field
+                if (!empty($quotation_code) && !empty($job_id)) {
+                    $quotation_id = $quotation_code;
+                    update_post_meta($job_post->ID, 'quotation_id', $quotation_id);
+                }
+            }
+        }
+    }
+}
+add_action('super_before_email_success_msg_action', 'update_tp_job_post_meta', 50, 1);
+
+
+// Update Quotation ID in the Job matching job_id
+function update_quotation_id_in_tp_job($post_id) {
+    global $wpdb;
+
+    // Check if the post is a quotation post type
+    if (get_post_type($post_id) == 'tp-quotation') {
+
+        // Get the job_id from the quotation post meta
+        $job_id = get_post_meta($post_id, 'job_id', true);
+
+        // Query the tp-job post type with the matching job_id
+        $job_args = array(
+            'post_type' => 'tp-job',
+            'meta_query' => array(
+                array(
+                    'key' => 'job_id',
+                    'value' => $job_id
+                )
+            )
+        );
+        $job_query = new WP_Query($job_args);
+
+        // If a tp-job post is found, update the quotation_id post meta with the quotation post title
+        if ($job_query->have_posts()) {
+            while ($job_query->have_posts()) {
+                $job_query->the_post();
+                $job_post_id = get_the_ID();
+                update_post_meta($job_post_id, 'quotation_id', get_the_title($post_id));
+            }
+            wp_reset_postdata();
+        }
+    }
+}
+add_action('save_post', 'update_quotation_id_in_tp_job');
+
+
+
+
+
+
+
+
+
+
+
 
 // Send notification to all Users with role "job-manager" - After job gets completed by Tradie
 function on_job_completed($form_entry) {
@@ -590,6 +695,23 @@ function on_job_completed($form_entry) {
     }
 }
 add_action('super_before_email_success_msg_action', 'on_job_completed', 30, 1);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Push notification to Tradie after Job Manager Completes the Job - Super Form ID 17569
 function on_job_completed_by_admin($form_entry) {
@@ -981,7 +1103,7 @@ function change_checkout_button_text( $button_text ) {
     return $button_text;
 }
 
-// Update Quotation Status after Payment
+// Update Quotation and Job Status after Payment
 function update_quotation_status( $order_id ) {
     // Get the order object
     $order = wc_get_order( $order_id );
@@ -1030,9 +1152,96 @@ function update_quotation_status( $order_id ) {
             $quotation_post = $quotation_query->posts[0];
             update_post_meta( $quotation_post->ID, 'quotation_status', 'Payment completed' );
         }
+        
+        // Find the tp-job post with matching job ID
+        $job_query = new WP_Query(
+            array(
+                'post_type' => 'tp-job',
+                'meta_key' => 'job_id',
+                'meta_value' => $job_id,
+                'meta_compare' => '=',
+                'posts_per_page' => 1,
+            )
+        );
+        
+        // Update the job status to "Completed"
+        if ( $job_query->have_posts() ) {
+            $job_post = $job_query->posts[0];
+            update_post_meta( $job_post->ID, 'job_status', 'Completed' );
+        }
     }
 }
 add_action( 'woocommerce_order_status_completed', 'update_quotation_status', 10, 1 );
+
+
+// Push Notifications to Tradie & Job Managers after Payment Completed
+function send_completion_notification($order_id) {
+    // Check if the order has product ID 22510
+    $order = wc_get_order( $order_id );
+    $product_id = reset( $order->get_items() )['product_id'];
+    if ($product_id != 22510) {
+        return;
+    }
+
+    // Get the billing job ID from the order meta
+    $job_id = $order->get_meta( 'billing_job_id' );
+
+    // Find the job post with matching job ID
+    $job_query = new WP_Query(
+        array(
+            'post_type' => 'tp-job',
+            'meta_key' => 'job_id',
+            'meta_value' => $job_id,
+            'meta_compare' => '=',
+            'posts_per_page' => 1,
+        )
+    );
+
+    // Send notification to the job author and job managers
+    if ($job_query->have_posts()) {
+        $job_post = $job_query->posts[0];
+
+        // Get the post meta data
+        $tradie_cost = get_post_meta($job_post->ID, 'tradie_cost', true);
+        $client_name = get_post_meta($job_post->ID, 'name', true);
+        $platform_fee = get_post_meta($job_post->ID, 'platform_fee', true);
+
+        // Send notification to the job author
+        $author_id = $job_post->post_author;
+        $author_name = get_the_author_meta('display_name', $author_id);
+        $title = "It's done! - Earnings: $$tradie_cost";
+        $message = "$client_name has released the balance for job ID #{$job_id}. Your funds will appear soon in your bank account.";
+        try {
+            send_onesignal_notification($title, $message, $author_id);
+        } catch (Exception $e) {
+            error_log('Error in send_completion_notification: ' . $e->getMessage());
+        }
+
+        // Send notification to job managers
+        $job_manager_role = 'job-manager';
+        $args = array(
+            'role' => $job_manager_role,
+        );
+        $job_managers = get_users($args);
+        foreach ($job_managers as $job_manager) {
+            $job_manager_id = $job_manager->ID;
+            $title = "It's done! - Earnings: $platform_fee";
+            $message = "$client_name has released the balance for job ID #{$job_id}. Job completed!";
+            try {
+                send_onesignal_notification($title, $message, $job_manager_id);
+            } catch (Exception $e) {
+                error_log('Error in send_completion_notification: ' . $e->getMessage());
+            }
+        }
+
+        // Update the job status to "Completed"
+    }
+}
+add_action( 'woocommerce_order_status_completed', 'send_completion_notification', 10, 1 );
+
+
+
+
 
 // Hide Deposit due & Remaining on Complete Payment checkout
 add_filter( 'woocommerce_checkout_fields', 'show_hide_checkout_fields' );
@@ -1060,3 +1269,122 @@ function show_hide_checkout_fields( $fields ) {
 
     return $fields;
 }
+
+
+// Create Quotation after form submitted
+function create_tp_quotation_post($form_entry) {
+    // Check if the form ID is 22490
+    if ($form_entry['form_id'] == 22490) {
+        // Get the form data
+        $job_id = '';
+        $job_name = '';
+        $client_address = '';
+        $job_date = '';
+        $job_time = '';
+        $tradie_proposed_date = '';
+        $client_name = '';
+        $client_email = '';
+        $client_phone = '';
+        $tradie_cost = '';
+        $platform_fee = '';
+        $total_job_cost = '';
+        $deposit_client = '';
+        $remaining_amount = '';
+        $post_title = '';
+        $post_slug = '';
+
+        foreach ($form_entry['data'] as $field) {
+            if ($field['name'] === 'job_id') {
+                $job_id = $field['value'];
+            } elseif ($field['name'] === 'job_name') {
+                $job_name = $field['value'];
+            } elseif ($field['name'] === 'client_address') {
+                $client_address = $field['value'];
+            } elseif ($field['name'] === 'job_date') {
+                $job_date = $field['value'];
+            } elseif ($field['name'] === 'job_time') {
+                $job_time = $field['value'];
+            } elseif ($field['name'] === 'tradie_proposed_date') {
+                $tradie_proposed_date = $field['value'];
+            } elseif ($field['name'] === 'client_name') {
+                $client_name = $field['value'];
+            } elseif ($field['name'] === 'client_email') {
+                $client_email = $field['value'];
+            } elseif ($field['name'] === 'client_phone') {
+                $client_phone = $field['value'];
+            } elseif ($field['name'] === 'tradie_cost') {
+                $tradie_cost = $field['value'];
+            } elseif ($field['name'] === 'platform_fee') {
+                $platform_fee = $field['value'];
+            } elseif ($field['name'] === 'total_job_cost') {
+                $total_job_cost = $field['value'];
+            } elseif ($field['name'] === 'deposit_client') {
+                $deposit_client = $field['value'];
+            } elseif ($field['name'] === 'remaining_amount') {
+                $remaining_amount = $field['value'];
+            } elseif ($field['name'] === 'post_title') {
+                $post_title = $field['value'];
+                $post_slug = sanitize_title($post_title);
+            }
+        }
+
+        // Get the job category term slug
+        $job_category_slug = $form_entry['data']['post_term_slugs_job-category']['value'];
+
+        // Check if the post title already exists
+        $args = array(
+            'post_type' => 'tp-quotation',
+            'name' => $post_slug,
+            'posts_per_page' => 1,
+        );
+        $query = new WP_Query($args);
+
+        if ($query->have_posts()) {
+            // If the post exists, update the post meta fields
+            $existing_quotation = $query->posts[0];
+            $quotation_id = $existing_quotation->ID;
+            // Update the post meta fields with the submission data
+            update_post_meta($quotation_id, 'tradie_cost', $tradie_cost);
+            update_post_meta($quotation_id, 'platform_fee', $platform_fee);
+            update_post_meta($quotation_id, 'total_job_cost', $total_job_cost);
+            update_post_meta($quotation_id, 'deposit_client', $deposit_client);
+            update_post_meta($quotation_id, 'remaining_amount', $remaining_amount);
+            } else {
+            // If the post doesn't exist, create a new one
+            $post_slug = sanitize_title($post_title);
+            $post_data = array(
+            'post_title' => $post_title,
+            'post_status' => 'publish',
+            'post_type' => 'tp-quotation',
+            'post_name' => $post_slug,
+            );
+                    // Insert the post and get the post ID
+        $quotation_id = wp_insert_post($post_data);
+
+        // Add the post meta fields with the submission data
+        add_post_meta($quotation_id, 'job_id', $job_id);
+        add_post_meta($quotation_id, 'job_name', $job_name);
+        add_post_meta($quotation_id, 'address', $client_address);
+        add_post_meta($quotation_id, 'date', $job_date);
+        add_post_meta($quotation_id, 'time', $job_time);
+        add_post_meta($quotation_id, 'tradie_proposed_date', $tradie_proposed_date);
+        add_post_meta($quotation_id, 'name', $client_name);
+        add_post_meta($quotation_id, 'email', $client_email);
+        add_post_meta($quotation_id, 'phone', $client_phone);
+        add_post_meta($quotation_id, 'tradie_cost', $tradie_cost);
+        add_post_meta($quotation_id, 'platform_fee', $platform_fee);
+        add_post_meta($quotation_id, 'total_job_cost', $total_job_cost);
+        add_post_meta($quotation_id, 'deposit_client', $deposit_client);
+        add_post_meta($quotation_id, 'remaining_amount', $remaining_amount);
+
+        // Set the job-category term for the quotation post
+        $job_category_term = get_term_by('slug', $form_entry['data']['post_term_slugs_job-category']['value'], 'job-category');
+        if ($job_category_term) {
+            wp_set_object_terms($quotation_id, array($job_category_term->term_id), 'job-category');
+            }
+        }
+    }
+}
+add_action('super_before_email_success_msg_action', 'create_tp_quotation_post', 10, 2);
+
+// Send Email Reminder for Remaining Balance every 3 days
