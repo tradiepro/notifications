@@ -1387,4 +1387,34 @@ function create_tp_quotation_post($form_entry) {
 }
 add_action('super_before_email_success_msg_action', 'create_tp_quotation_post', 10, 2);
 
+
+// Update job with Quotation Post ID
+function update_tp_job_quotation_wp_id($post_id) {
+    // Check if the post type is tp-quotation
+    if (get_post_type($post_id) == 'tp-quotation') {
+        // Get the job_id of the quotation
+        $job_id = get_post_meta($post_id, 'job_id', true);
+        if ($job_id) {
+            // Find the corresponding tp-job post using the job_id post meta field
+            $args = array(
+                'post_type' => 'tp-job',
+                'meta_key' => 'job_id',
+                'meta_value' => $job_id,
+                'posts_per_page' => 1,
+            );
+            $query = new WP_Query($args);
+            if ($query->have_posts()) {
+                // Update the quotation_wp_id post meta field of the corresponding tp-job post
+                $tp_job = $query->posts[0];
+                $tp_job_id = $tp_job->ID;
+                update_post_meta($tp_job_id, 'quotation_wp_id', $post_id);
+            }
+        }
+    }
+}
+add_action('save_post', 'update_tp_job_quotation_wp_id');
+
+
+// Update Quotation Status and timestamp after Request Payment form is submitted
+
 // Send Email Reminder for Remaining Balance every 3 days
