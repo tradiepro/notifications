@@ -1,6 +1,5 @@
 const express = require('express');
 const mysql = require('mysql');
-const redis = require('redis');
 
 // const nodemailer = require('nodemailer');
 // const transporter = nodemailer.createTransport({ host:"mail.teachertables.com", port:465, secure:true, auth:{ user:'admin@teachertables.com', pass:'RetirementPresent4May', }, });
@@ -19,8 +18,8 @@ const transporter = nodemailer.createTransport({
     dkim: { domainName: 'teachertables.com', keySelector: 'teachertablesdkim1', privateKey: privateKey }
 });
 
-const redis = require('redis').createClient();
-const client = redis.createClient();
+
+const client = require('redis').createClient();
 
 client.on('connect', () => {
   console.log('Connected to Redis');
