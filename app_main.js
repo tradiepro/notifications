@@ -1,23 +1,17 @@
 const express = require('express');
 const mysql = require('mysql');
 
-// const nodemailer = require('nodemailer');
-// const transporter = nodemailer.createTransport({ host:"mail.teachertables.com", port:465, secure:true, auth:{ user:'admin@teachertables.com', pass:'RetirementPresent4May', }, });
-
 const nodemailer = require('nodemailer');
 const fs = require('fs');
 
-// read private key from file
 const privateKey = fs.readFileSync('/home/teache13/keys/private-key.pem', 'utf8');
 
-// configure Nodemailer transport
 const transporter = nodemailer.createTransport({
     host: 'mail.teachertables.com',
     port: 465, secure: true,
     auth: { user: 'admin@teachertables.com', pass: 'RetirementPresent4May' },
     dkim: { domainName: 'teachertables.com', keySelector: 'teachertablesdkim1', privateKey: privateKey }
 });
-
 
 const client = require('redis').createClient();
 
@@ -32,7 +26,7 @@ client.on('error', (err) => {
 const app = express();
 const server = require("http").createServer(app);
 
-const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origan : "*"} }); // pingInterval = ping sent every 25 seconds & pingTimeout = expect a response within 10 seconds
+const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origan : "*"} });
 
 const pool_users_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_users_app', password : 'rMLlcaYNFRai', database : 'teache13_users', debug : false });
 const pool_myplace_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_myplace_app', password : 'dPKlBfuOfvz8', database : 'teache13_myplace', debug : false });
@@ -42,7 +36,14 @@ app.set('view engine', 'ejs');
 app.use(express.static('public'));
 app.use(express.urlencoded({ extended: false }));
 
-server.listen();
+const host = '0.0.0.0'; // Listen on all available network interfaces
+const port = process.env.PORT || 5000;
+
+server.listen(port, host, function () {
+  console.log(`app listening on ${host}:${port}`);
+});
+
+
 
 io.on('connection', (socket) => { 
 
