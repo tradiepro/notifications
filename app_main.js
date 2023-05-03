@@ -18,8 +18,16 @@ const transporter = nodemailer.createTransport({
     dkim: { domainName: 'teachertables.com', keySelector: 'teachertablesdkim1', privateKey: privateKey }
 });
 
-const redis = require('redis').createClient();
-redis.connect();
+const redis = require('redis');
+const client = redis.createClient();
+
+client.on('connect', function() {
+  console.log('Connected to Redis');
+});
+
+client.on('error', function (err) {
+  console.log('Error connecting to Redis: ' + err);
+});
 
 const app = express();
 const server = require("http").createServer(app);
