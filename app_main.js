@@ -1,21 +1,11 @@
-
+const express = require('express');
+const mysql = require('mysql');
 
 // const nodemailer = require('nodemailer');
 // const transporter = nodemailer.createTransport({ host:"mail.teachertables.com", port:465, secure:true, auth:{ user:'admin@teachertables.com', pass:'RetirementPresent4May', }, });
 
-
-const express = require('express');
-const mysql = require('mysql');
 const nodemailer = require('nodemailer');
 const fs = require('fs');
-const redis = require('redis').createClient();
-
-redis.on('error', function (err) {
-  console.log('Redis Error: ' + err);
-});
-
-const app = express();
-const http = require("http");
 
 // read private key from file
 const privateKey = fs.readFileSync('/home/teache13/keys/private-key.pem', 'utf8');
@@ -28,19 +18,17 @@ const transporter = nodemailer.createTransport({
     dkim: { domainName: 'teachertables.com', keySelector: 'teachertablesdkim1', privateKey: privateKey }
 });
 
+const redis = require('redis').createClient();
+redis.connect();
+
+const app = express();
+const server = require("http").createServer(app);
+
+const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origan : "*"} }); // pingInterval = ping sent every 25 seconds & pingTimeout = expect a response within 10 seconds
+
 const pool_users_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_users_app', password : 'rMLlcaYNFRai', database : 'teache13_users', debug : false });
 const pool_myplace_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_myplace_app', password : 'dPKlBfuOfvz8', database : 'teache13_myplace', debug : false });
 const pool_teachers_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_teachers_app', password : 'u7cf5WuWWgjx', database : 'teache13_teachers', debug : false });
-
-const server = http.createServer(app);
-const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origan : "*"} }); // pingInterval = ping sent every 25 seconds & pingTimeout = expect a response within 10 seconds
-
-const port = process.env.PORT || 3000;
-
-server.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
-
 
 app.set('view engine', 'ejs');
 app.use(express.static('public'));
@@ -1993,5 +1981,3 @@ app.get('/node_redisONtt/append/:key/:value', (req,res) => {
         res.send(req.params.key+' : '+req.params.value);
     });
 });
-
-
