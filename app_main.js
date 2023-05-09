@@ -23,6 +23,14 @@ client.on('error', (err) => {
   console.log('Error connecting to Redis:', err);
 });
 
+client.set('test', 'value', (err, reply) => {
+  if (err) {
+    console.error('Error connecting to Redis:', err);
+  } else {
+    console.log('Connected to Redis');
+  }
+});
+
 const app = express();
 const server = require("http").createServer(app);
 
@@ -70,7 +78,7 @@ io.on('connection', (socket) => {
 
     socket.on('link_user_to_teacher_via_gCode', (params, socketResp) => { let newArrayOfStudents;     let linkedTeachers;
 
-        client.GET(params.gCode+'_teacher_details').then( (teacherDetails) => { let teacher_details = teacherDetails.split('>>');        // [teacherID, teacherName, classPW, arrayOfStudents]
+        GET(params.gCode+'_teacher_details').then( (teacherDetails) => { let teacher_details = teacherDetails.split('>>');        // [teacherID, teacherName, classPW, arrayOfStudents]
         
             params.teacherID = teacher_details[0];          params.teacherName = teacher_details[1];
             params.classPW = teacher_details[2];            params.arrayOfStudents = teacher_details[3]; 
@@ -279,7 +287,7 @@ io.on('connection', (socket) => {
             let gameCode = alpha[dig1]+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
 
             params.gameCode = gameCode;
-            client.GET(gameCode+'_teacher_details').then( (results) => { 
+            GET(gameCode+'_teacher_details').then( (results) => { 
                 if (results !== null || gameCode == 'arse' || gameCode=='cunt' || gameCode=='fuck' || gameCode=='dick' || gameCode=='slut' || gameCode=='fukk' || gameCode=='shit' || gameCode=='kunt' || gameCode=='piss' || gameCode=='pooo' ) { 
                     getGameCode(params);  // try again for a unique gameCode
                 }
@@ -500,7 +508,7 @@ io.on('connection', (socket) => {
 
     socket.on('reBoot_at_round_end', (gCode_Rnd) => { // reboot if no response after 63 sec game time
         
-        client.GET(gCode+'_game_status').then( (game_status) => {
+        GET(gCode+'_game_status').then( (game_status) => {
             if (game_status.split('>>').length == 6) {                          // check if game has been 'paused' before reBooting the start of the next round
         
                 gCode = gCode_Rnd.split('|>|')[0];
@@ -508,7 +516,7 @@ io.on('connection', (socket) => {
         
                 let reBoot_atRoundEnd = false;
         
-                client.GET(gCode+'_last_reBoot').then( (last_reBoot) => { 
+                GET(gCode+'_last_reBoot').then( (last_reBoot) => { 
                     
                     if (last_reBoot !== gRnd+'>reBoot_at_round_end') { reBoot_atRoundEnd = true; }
                     if (parseInt(gRnd) < parseInt(last_reBoot.split('>')[0])) { reBoot_atRoundEnd = false; }
@@ -530,7 +538,7 @@ io.on('connection', (socket) => {
 
         let reBoot_toStartGameAfterLoaded = false;
         
-        client.GET(gCode+'_last_reBoot').then( (last_reBoot) => {
+        GET(gCode+'_last_reBoot').then( (last_reBoot) => {
             
             if (last_reBoot !== gRnd+'>reBoot_to_start_game_after_loaded') { reBoot_toStartGameAfterLoaded = true; }
             if (parseInt(gRnd) < parseInt(last_reBoot.split('>')[0])) { reBoot_toStartGameAfterLoaded = false; }
@@ -567,7 +575,7 @@ io.on('connection', (socket) => {
 
         let reBoot_after62secOfRunning = false;
 
-        client.GET(gCode+'_last_reBoot').then( (last_reBoot) => {
+        GET(gCode+'_last_reBoot').then( (last_reBoot) => {
             
             if (last_reBoot !== gRnd+'>reBoot_after_62sec_of_running') { reBoot_after62secOfRunning = true; }
             if (parseInt(gRnd) < parseInt(last_reBoot.split('>')[0])) { reBoot_after62secOfRunning = false; }
@@ -1271,7 +1279,7 @@ app.get('/submit_game_code/:ref/:user', (req, res) => { // this is route to dire
             if (results[0].gameCode == 'none') { res.render('submit_game_code', { ref:params.ref, user:params.user, teacherLinks:results[0].activityNotes, alert_gameCode:'' }); }
             else { 
                 // it goes here if student has already been logged in to game but got out BUT still has a recorded gameCode in their db.
-                client.GET(results[0].gameCode+'_game_status').then( (gameStatus) => { gState = gameStatus.split('>>')[0];
+                GET(results[0].gameCode+'_game_status').then( (gameStatus) => { gState = gameStatus.split('>>')[0];
                     if (gState !== 'deleted' || gState !== 'finished') {
                         // then get redisData of gameCode_student_groups and send through as well.  if it equals 'none' then either no student groupings.  if it doesn't exist then it is a single game
                         // in play_game the student worls out which group it is in, or none
@@ -1429,7 +1437,7 @@ app.get('/teacher/get_game_code/:ref/:user', (req, res) => { // res.send('in /te
                 let gameCode = alpha[dig1]+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
                 thisTeacher.gameCode = gameCode;
                     
-                client.GET(gameCode+'_teacher_details').then( (isResults) => {  // res.send(isResults);
+                GET(gameCode+'_teacher_details').then( (isResults) => {  // res.send(isResults);
                     if (isResults !== null || gameCode == 'arse' || gameCode=='cunt' || gameCode=='fuck' || gameCode=='dick' || gameCode=='slut' || gameCode=='fukk' || gameCode=='shit' || gameCode=='kunt' || gameCode=='piss' || gameCode=='pooo' ) { 
                         getGameCode(thisTeacher);  // try again for a unique gameCode
                     }
@@ -1496,7 +1504,7 @@ app.get('/teacher/get_group_games_code/:ref/:user', (req, res) => {
                 let gameCode = 'c'+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
                 thisTeacher.gameCode = gameCode;
 
-                client.GET(gameCode+'_teacher_details').then( (isResults) => { 
+                GET(gameCode+'_teacher_details').then( (isResults) => { 
                     if (isResults !== null || gameCode=='arse' || gameCode=='cunt' || gameCode=='fuck' || gameCode=='dick' || gameCode=='slut' || gameCode=='fukk' || gameCode=='shit' || gameCode=='kunt' || gameCode=='piss' || gameCode=='pooo' ) { 
                         getGameCode(thisTeacher);  // try again for a unique gameCode
                     }
@@ -1554,7 +1562,7 @@ function delete_game(params,path,res) {
             pool_teachers_db.query("DROP TABLE "+pass_1.gameCode, pass_1, (error, results, fields)=>{ 
                 let pass_2 = pass_1;
                 
-                client.GET(pass_2.gameCode+'_linked_users').then( (linked_users) => {
+                GET(pass_2.gameCode+'_linked_users').then( (linked_users) => {
                     if (linked_users !== '|') {
                         let linkedUsers = linked_users.split('|');
                         
@@ -1688,7 +1696,7 @@ app.post('/link_user_to_gameCode/:ref/:user/:gameCode', (req, res) => { let para
             pool_users_db.query("UPDATE userID_"+params.ref+"_activities SET gameCode='"+params.gameCode+"' WHERE activity='teacherCodes'", params, (error, results, fields)=>{ 
                 let params_2 = params;
                 
-                client.GET(params_2.gameCode+'_linked_users').then( (linked_users) => { 
+                GET(params_2.gameCode+'_linked_users').then( (linked_users) => { 
                     
                     if (!linked_users) { 
                         pool_teachers_db.query("SELECT * FROM "+params_2.gameCode, params, (err, results, fields)=>{
@@ -1726,7 +1734,7 @@ app.post('/link_user_to_gameCode/:ref/:user/:gameCode', (req, res) => { let para
 ////////////////////////////////////////////////////////////////////////////////
 app.post('/link_casual_user_to_gameCode', (req, res) => { // req.body = .ref, .user, .currentLinkedTeachers, .gameCode
 
-    client.GET(req.body.gameCode+'_teacher_details').then( (results) => { // let teacher_details = teacherDetails.split('>>');
+    GET(req.body.gameCode+'_teacher_details').then( (results) => { // let teacher_details = teacherDetails.split('>>');
 
         if ( !results ) { res.render('submit_game_code', { ref: 'nonMember', user: 'guest', teacherLinks: 'none', alert_gameCode: 'Not a valid Game Code, see your teacher.' }); }
 
@@ -1734,7 +1742,7 @@ app.post('/link_casual_user_to_gameCode', (req, res) => { // req.body = .ref, .u
         params.ref = params.gameCode + Math.floor(Math.random() * 9999).toString();  // else ref = logged-in idKey / ref
 
         let getUniqueRef = function(params) {
-            client.GET(params.gameCode+'_linked_users').then( (linked_users) => {
+            GET(params.gameCode+'_linked_users').then( (linked_users) => {
                 
                 let isUniqueRef = true;
                 
@@ -1996,7 +2004,7 @@ app.get('/node_redisONtt/set/:key/:value', (req,res) => {
 });
 
 app.get('/node_redisONtt/get/:key', (req,res) => {
-    client.GET(req.params.key).then( (value) => {
+    GET(req.params.key).then( (value) => {
         res.send(req.params.key+' : '+value);
     });
 });
