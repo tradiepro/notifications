@@ -26,7 +26,14 @@ client.on('error', (err) => {
 const app = express();
 const server = require("http").createServer(app);
 
-const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origan : "*"} });
+const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origin : "*"} });
+
+const redisAdapter = require('socket.io-redis');
+io.adapter(redisAdapter({ host: 'localhost', port: 6379 }));
+
+io.on('error', (error) => {
+  console.error('socket.io error:', error);
+});
 
 const pool_users_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_users_app', password : 'rMLlcaYNFRai', database : 'teache13_users', debug : false });
 const pool_myplace_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_myplace_app', password : 'dPKlBfuOfvz8', database : 'teache13_myplace', debug : false });
