@@ -1,51 +1,41 @@
+console.log('here we are in the app as of 230522 at '+Date.now().toString() );
+
 const express = require('express');
-const mysql = require('mysql');
+const app = express();
+const server = require("http").createServer(app);
+// const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origin : "*"} });
+const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origin : "*", methods: ["GET","POST"], credentials: true} });
 
-const nodemailer = require('nodemailer');
+io.on('error', (error) => { console.error('socket.io error:', error); });
+
+io.on('connection', (socket) => { console.log(socket.id) });
+console.log('is there a response from socket "connection"?');
+
+const client = require('redis').createClient();                                 // ### redis setup ###
+const util = require('util');
+const mgetAsync = util.promisify(client.MGET).bind(client);
+const delAsync = util.promisify(client.del).bind(client);
+
+client.on('connect', () => { console.log('Connected to Redis as of 230522'); });
+client.on('error', (err) => { console.log('Error connecting to Redis:', err); });
+
+const redisAdapter = require('socket.io-redis');
+io.adapter(redisAdapter({ host: 'localhost', port: 6379 }));
+
+const mysql = require('mysql');                                                 // ### data base setup ###
+const pool_users_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_users_app', password : 'rMLlcaYNFRai', database : 'teache13_users', debug : false });
+const pool_myplace_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_myplace_app', password : 'dPKlBfuOfvz8', database : 'teache13_myplace', debug : false });
+const pool_teachers_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_teachers_app', password : 'u7cf5WuWWgjx', database : 'teache13_teachers', debug : false });
+
+const nodemailer = require('nodemailer');                                       // ### email setup ###
 const fs = require('fs');
-
 const privateKey = fs.readFileSync('/home/teache13/keys/private-key.pem', 'utf8');
-
 const transporter = nodemailer.createTransport({
     host: 'mail.teachertables.com',
     port: 465, secure: true,
     auth: { user: 'admin@teachertables.com', pass: 'RetirementPresent4May' },
     dkim: { domainName: 'teachertables.com', keySelector: 'teachertablesdkim1', privateKey: privateKey }
 });
-
-const client = require('redis').createClient();
-
-client.on('connect', () => {
-  console.log('Connected to Redis');
-});
-
-client.on('error', (err) => {
-  console.log('Error connecting to Redis:', err);
-});
-
-client.set('test', 'value', (err, reply) => {
-  if (err) {
-    console.error('Error connecting to Redis:', err);
-  } else {
-    console.log('Connected to Redis');
-  }
-});
-
-const app = express();
-const server = require("http").createServer(app);
-
-const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origin : "*"} });
-
-const redisAdapter = require('socket.io-redis');
-io.adapter(redisAdapter({ host: 'localhost', port: 6379 }));
-
-io.on('error', (error) => {
-  console.error('socket.io error:', error);
-});
-
-const pool_users_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_users_app', password : 'rMLlcaYNFRai', database : 'teache13_users', debug : false });
-const pool_myplace_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_myplace_app', password : 'dPKlBfuOfvz8', database : 'teache13_myplace', debug : false });
-const pool_teachers_db = mysql.createPool({ connectionLimit : 100, host : 'localhost', user : 'teache13_teachers_app', password : 'u7cf5WuWWgjx', database : 'teache13_teachers', debug : false });
 
 app.set('view engine', 'ejs');
 app.use(express.static('public'));
@@ -54,32 +44,40 @@ app.use(express.urlencoded({ extended: false }));
 const host = '0.0.0.0'; // Listen on all available network interfaces
 const port = process.env.PORT || 5000;
 
-server.listen(port, host, function () {
-  console.log(`app listening on ${host}:${port}`);
-});
+server.listen(port, host, function () { console.log(`app (as of 230522) listening on ${host}:${port}`); });
 
-
-
-io.on('connection', (socket) => { 
+io.on('connection', (socket) => { console.log('socket connection established in main logic of app');
 
     //#####################################################################################################
     /////// ### following socket connection are from the student "submit_game_code" page //////////////////
     socket.on('check_type_of_gCode', (gCode, socketResp) => {
-        client.MGET([gCode+'_game_status',gCode+'_teacher_details']).then( (data) => {
-            if (data[0] !== null) { let gState = data[0].split('>>')[0];
-                if (gState !== 'deleted' || gState !== 'finished') {               // [ state, timeStamp, round, maxGroupSize, currentGame, total_rnds ]
+        mgetAsync([gCode+'_game_status',gCode+'_teacher_details']).then( (data) => {
+            if (data[0] !== null) { 
+                let gState = data[0].split('>>')[0];
+                if (gState !== 'deleted' || gState !== 'finished') { // [ state, timeStamp, round, maxGroupSize, currentGame, total_rnds ]
                     socketResp(data[1]);
-                }
-                else { socketResp(null); }                
+                } else { 
+                    socketResp(null); 
+                }                
+            } else { 
+                socketResp(null); 
             }
-            else { socketResp(null); }
+        }).catch(err => {
+            // handle error here
+            console.error(err);
         });
     });
-
+    
     socket.on('link_user_to_teacher_via_gCode', (params, socketResp) => { let newArrayOfStudents;     let linkedTeachers;
-
-        GET(params.gCode+'_teacher_details').then( (teacherDetails) => { let teacher_details = teacherDetails.split('>>');        // [teacherID, teacherName, classPW, arrayOfStudents]
+        client.get(params.gCode + '_teacher_details', (err, teacherDetails) => {
+            if (err) {
+                // Handle the error here
+                console.error(err);
+                return;
+            }
         
+            let teacher_details = teacherDetails.split('>>'); // [teacherID, teacherName, classPW, arrayOfStudents]
+           
             params.teacherID = teacher_details[0];          params.teacherName = teacher_details[1];
             params.classPW = teacher_details[2];            params.arrayOfStudents = teacher_details[3]; 
 
@@ -97,14 +95,19 @@ io.on('connection', (socket) => {
                     newArrayOfStudents = pass_1.arrayOfStudents+"|>|"+pass_1.ref+">"+results2[0].studentFullName+">N>none>N>none>N>none>"+dateNow+">"+dateNow+">"+dateNow+">Ungrouped";
                     teacher_details = pass_1.teacherID+'>>'+pass_1.teacherName+'>>'+pass_1.classPW+'>>'+newArrayOfStudents;
                     
-                    client.SETEX(pass_1.gCode+'_teacher_details', 7200, teacher_details).then( ()=>{
+                    client.SETEX(pass_1.gCode+'_teacher_details', 7200, teacher_details, (error) => {
+                        if (error) {
+                            // Handle the error
+                        } else {
+                            // Continue with your logic
+                        }
     
                         pool_teachers_db.query("UPDATE teacherID_"+pass_1.teacherID+" SET arrayOfStudents='"+newArrayOfStudents+"' WHERE ref='"+pass_1.teacherID+"'", (error, results, fields)=>{ 
                             if (pass_1.currentLinkedTeachers == 'none') { linkedTeachers = pass_1.teacherID +"_"+ pass_1.teacherName }
                             else { linkedTeachers = pass_1.currentLinkedTeachers + "," + pass_1.teacherID +"_"+ pass_1.teacherName }
                             pool_users_db.query("UPDATE userID_"+pass_1.ref+"_activities SET activityNotes='"+linkedTeachers+"' WHERE activity='teacherCodes'", (error, results, fields)=>{ 
 
-                                pool_users_db.query("INSERT INTO userID_"+pass_1.ref+"_activities VALUES('"+pass_1.teacherID+"_tasks','none','none','none', 'none,3,111,none,3,222,none,3,333,"+pass_1.teacherName+","+pass_1.teacherID+","+dateNow+"','0,0,0','none','none','aux_1','aux_2','teacherTasks')", (error, results, fields)=>{
+                                pool_users_db.query("INSERT INTO userID_"+pass_1.ref+"_activities VALUES('"+pass_1.teacherID+"_tasks','none','none','none', 'none,3,111,none,3,222,none,3,333,"+pass_1.teacherName+","+pass_1.teacherID+","+dateNow+",0,0,0','0,0,0','none','none','aux_1','aux_2','teacherTasks')", (error, results, fields)=>{
                                     socketResp('student_and_teacher_linkage');
                                 });
                             });
@@ -123,7 +126,7 @@ io.on('connection', (socket) => {
             let pass_1 = params;
             let linkedTeachers = pass_1.teacherRef +"_"+ pass_1.teacherName;
             pool_users_db.query("UPDATE userID_"+pass_1.userRef+"_activities SET activityNotes='"+linkedTeachers+"' WHERE activity='teacherCodes'", (error, results, fields)=>{ 
-                pool_users_db.query("INSERT INTO userID_"+pass_1.userRef+"_activities VALUES('"+pass_1.teacherRef+"_tasks','none','none','none', 'none,3,111,none,3,222,none,3,333,"+pass_1.teacherName+","+pass_1.teacherRef+","+dateNow+"','0,0,0','none','none','aux_1','aux_2','teacherTasks')", (error, results, fields)=>{
+                pool_users_db.query("INSERT INTO userID_"+pass_1.userRef+"_activities VALUES('"+pass_1.teacherRef+"_tasks','none','none','none', 'none,3,111,none,3,222,none,3,333,"+pass_1.teacherName+","+pass_1.teacherRef+","+dateNow+",0,0,0','0,0,0','none','none','aux_1','aux_2','teacherTasks')", (error, results, fields)=>{
                     socketResp('linkage_success');
                 });
             });
@@ -144,13 +147,11 @@ io.on('connection', (socket) => {
             if ( results.length === 0 ) {
                 socketResp('not_valid_username>idKey>name');
             }
-            
             else if (results[0].userPassCode && results[0].idKey && results[0].studentFirstName) {
                 if (results[0].userPassCode !== params.passWord) { socketResp('passWord_does_not_match>idKey>name'); }
                 else if (results[0].userPassCode == params.passWord) {
                     thisUser = results[0];
                     pool_users_db.query("UPDATE userID_"+thisUser.idKey+"_activities SET timeStamp="+Date.now().toString()+" WHERE activity='history'", thisUser, (error, results, fields)=>{
-                        
                         let pass = thisUser;
                         pool_users_db.query("SELECT activityNotes FROM userID_"+pass.idKey+"_activities WHERE activity='teacherCodes'", pass, (error, activityResults, fields)=>{
                             socketResp('logged_in>'+pass.idKey+'>'+pass.studentFirstName+'>'+activityResults[0].activityNotes);
@@ -239,26 +240,57 @@ io.on('connection', (socket) => {
 
     socket.on('save_group_games_to_teacher_db', (ref, groupGames) => { pool_teachers_db.query("UPDATE teacherID_"+ref+" SET groupGames='"+groupGames+"' WHERE ref='"+ref+"'"); });
 
+
     function retrieve_and_check_redisData(gCode,returnRedis) {
-        
-        client.MGET([gCode+'_game_status',gCode+'_linked_users',gCode+'_user_results',gCode+'_user_ranking',gCode+'_teacher_details']).then( (data) => {
+        mgetAsync([gCode+'_game_status', gCode+'_linked_users', gCode+'_user_results', gCode+'_user_ranking', gCode+'_teacher_details'])
+        .then((data) => {
 
             if (data[0] == null || data[1] == null || data[2] == null || data[3] == null || data[4] == null ) {
-
+                
                 pool_teachers_db.query("SELECT * FROM "+gCode+" WHERE gCode='"+gCode+"'", gCode, (error, results, fields)=>{ // socketResp(results[0].game_status);
 
                     // to test, run following in redis-cli terminal
                     // DEL _game_status _linked_users _user_results
 
-                    client.SETEX(gCode+'_game_status', 7200, results[0].game_status).then( () => { // SET for 2 hr = 7200 seconds
-                        client.SETEX(gCode+'_linked_users', 7200, results[0].linked_users).then( () => {
-                            client.SETEX(gCode+'_user_results', 7200, results[0].user_results).then( () => {  
-                                client.SETEX(gCode+'_user_ranking', 7200, results[0].user_ranking).then( () => { 
-                                    client.SETEX(gCode+'_teacher_details', 7200, results[0].teacher_details).then( () => {
+                    client.SETEX(gCode+'_game_status', 7200, results[0].game_status, (error) => {
+                        if (error) {
+                            // Handle the error
+                        } else {
+                            // Continue with your logic
+                        } // SET for 2 hr = 7200 seconds
+                        client.SETEX(gCode+'_linked_users', 7200, results[0].linked_users, (error) => {
+                            if (error) {
+                                // Handle the error
+                            } else {
+                                // Continue with your logic
+                            }
+                            client.SETEX(gCode+'_user_results', 7200, results[0].user_results, (error) => {
+                                if (error) {
+                                    // Handle the error
+                                } else {
+                                    // Continue with your logic
+                                } 
+                                client.SETEX(gCode+'_user_ranking', 7200, results[0].user_ranking, (error) => {
+                                    if (error) {
+                                        // Handle the error
+                                    } else {
+                                        // Continue with your logic
+                                    }
+                                    client.SETEX(gCode+'_teacher_details', 7200, results[0].teacher_details, (error) => {
+                                        if (error) {
+                                            // Handle the error
+                                        } else {
+                                            // Continue with your logic
+                                        }
                                                     // data = [game_status, linked_users, user_results, user_ranking, teacher_details]
-                                        client.MGET([gCode+'_game_status',gCode+'_linked_users',gCode+'_user_results',gCode+'_user_ranking',gCode+'_teacher_details']).then( (data) => {
+                                                    
+                                            mgetAsync([gCode+'_game_status',gCode+'_linked_users',gCode+'_user_results',gCode+'_user_ranking',gCode+'_teacher_details']).then( (data) => {
                                             returnRedis(data);
+                                        }).catch((error) => {
+                                            console.error(error);
+                                            // Handle the error in a way that makes sense for your application
                                         });
+                                        
                                     });                
                                 });
                             });
@@ -268,6 +300,10 @@ io.on('connection', (socket) => {
                 });                
             }
             else { returnRedis(data); }
+        })
+        .catch((error) => {
+            console.error(error);
+            // Handle the error in a way that makes sense for your application
         });
     }
 
@@ -287,7 +323,13 @@ io.on('connection', (socket) => {
             let gameCode = alpha[dig1]+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
 
             params.gameCode = gameCode;
-            GET(gameCode+'_teacher_details').then( (results) => { 
+            client.get(gameCode + '_teacher_details', (err, results) => {
+                if (err) {
+                    // Handle the error here
+                    console.error(err);
+                    return;
+                }
+
                 if (results !== null || gameCode == 'arse' || gameCode=='cunt' || gameCode=='fuck' || gameCode=='dick' || gameCode=='slut' || gameCode=='fukk' || gameCode=='shit' || gameCode=='kunt' || gameCode=='piss' || gameCode=='pooo' ) { 
                     getGameCode(params);  // try again for a unique gameCode
                 }
@@ -295,12 +337,42 @@ io.on('connection', (socket) => {
                     let pass = params;
                     let game_status = "not_started_yet>>"+Date.now().toString()+">>0>>"+pass.maxGroupSize+">>"+pass.currentGame;
 
-                    client.SETEX(pass.gameCode+'_game_status', 7200, game_status).then( () => { // SETEX for 2 hr = 7200 seconds
-                        client.SETEX(pass.gameCode+'_linked_users', 7200, '|').then( () => {
-                            client.SETEX(pass.gameCode+'_user_results', 7200, '').then( () => {  
-                                client.SETEX(pass.gameCode+'_user_ranking', 7200, '').then( () => { 
-                                    client.SETEX(pass.gameCode+'_teacher_details', 7200, 'nonMember>>guest').then( () => { 
-                                        client.SETEX(pass.gameCode+'_last_reBoot', 7200, 'none').then( () => { 
+                    client.SETEX(pass.gameCode+'_game_status', 7200, game_status, (error) => {
+                        if (error) {
+                            // Handle the error
+                        } else {
+                            // Continue with your logic
+                        } // SETEX for 2 hr = 7200 seconds
+                        client.SETEX(pass.gameCode+'_linked_users', 7200, '|', (error) => {
+                            if (error) {
+                                // Handle the error
+                            } else {
+                                // Continue with your logic
+                            }
+                            client.SETEX(pass.gameCode+'_user_results', 7200, '', (error) => {
+                                if (error) {
+                                    // Handle the error
+                                } else {
+                                    // Continue with your logic
+                                }
+                                client.SETEX(pass.gameCode+'_user_ranking', 7200, '', (error) => {
+                                    if (error) {
+                                        // Handle the error
+                                    } else {
+                                        // Continue with your logic
+                                    }
+                                    client.SETEX(pass.gameCode+'_teacher_details', 7200, 'nonMember>>guest', (error) => {
+                                        if (error) {
+                                            // Handle the error
+                                        } else {
+                                            // Continue with your logic
+                                        }
+                                        client.SETEX(pass.gameCode+'_last_reBoot', 7200, 'none', (error) => {
+                                            if (error) {
+                                                // Handle the error
+                                            } else {
+                                                // Continue with your logic
+                                            }
                                             pool_teachers_db.query("CREATE TABLE "+pass.gameCode+"(gCode varchar(10) PRIMARY KEY, game_status text, linked_users text, user_results text, user_ranking text, teacher_details text)", pass, (error, results, fields)=>{
                                                 pool_teachers_db.query("INSERT INTO "+pass.gameCode+" VALUES('"+pass.gameCode+"','"+game_status+"','|','|','|','nonMember>>guest')", (error, results, fields)=>{ 
                                                     socketResp(pass.gameCode);
@@ -320,7 +392,12 @@ io.on('connection', (socket) => {
     socket.on('start_game_sequence', (params) => { //params = [ "state", "timeStamp", "round", "maxGroupSize", "currentGame", "total_rnds"]
         let game_status = "uploading_wait>>"+Date.now().toString()+">>0>>"+params.maxGroupSize+">>"+params.currentGame+">>"+params.total_rnds;
 
-        client.SETEX(params.gameCode+'_game_status', 7200, game_status).then( () => { // start_clicked
+        client.SETEX(params.gameCode+'_game_status', 7200, game_status, (error) => {
+            if (error) {
+                // Handle the error
+            } else {
+                // Continue with your logic
+            } // start_clicked
             get_ready_to_START_new_round(params.gameCode);
         });
     });
@@ -342,7 +419,12 @@ io.on('connection', (socket) => {
                     game_status_wait = "uploading_wait_to_start>>"+Date.now().toString()+">>"+nextRnd+">>"+game_status[3]+">>"+game_status[4]+">>"+game_status[5];
                 }
             }
-            client.SETEX(gameCode+'_game_status', 7200, game_status_wait).then( () => {
+            client.SETEX(gameCode+'_game_status', 7200, game_status_wait, (error) => {
+                if (error) {
+                    // Handle the error
+                } else {
+                    // Continue with your logic
+                }
                 pool_teachers_db.query("UPDATE "+gameCode+" SET game_status='"+game_status_wait+"', user_results='"+data[gameCode+'_user_results']+"', user_ranking='"+data[gameCode+'_user_ranking']+"' WHERE gCode='"+gameCode+"'", gameCode, (err, results, fields)=>{
                     io.in(gameCode).emit(gameCode+'_get_ready_to_START', game_status_wait);  // wait_to_run
                 });
@@ -369,7 +451,12 @@ io.on('connection', (socket) => {
                                         game_status_running = "running>>"+Date.now().toString()+">>"+game_status[2]+">>"+game_status[3]+">>"+game_status[4]+">>"+game_status[5];
                                     }
                                 }
-                                client.SETEX(gameCode+'_game_status', 7200, game_status_running).then( () => {
+                                client.SETEX(gameCode+'_game_status', 7200, game_status_running, (error) => {
+                                    if (error) {
+                                        // Handle the error
+                                    } else {
+                                        // Continue with your logic
+                                    }
                                     pool_teachers_db.query("UPDATE "+gameCode+" SET game_status='"+game_status_running+"' WHERE gCode='"+gameCode+"'", gameCode, (err, results, fields)=>{
                                         io.in(gameCode).emit(gameCode+'_START', game_status_running);  // running
                                     });
@@ -389,7 +476,12 @@ io.on('connection', (socket) => {
                                             game_status_60s_complete = "rnd_complete_results_transfer>>"+Date.now().toString()+">>"+game_status[2]+">>"+game_status[3]+">>"+game_status[4]+">>"+game_status[5];
                                         }
                                     }
-                                    client.SETEX(gameCode+'_game_status', 7200, game_status_60s_complete).then( () => {
+                                    client.SETEX(gameCode+'_game_status', 7200, game_status_60s_complete, (error) => {
+                                        if (error) {
+                                            // Handle the error
+                                        } else {
+                                            // Continue with your logic
+                                        }
                                         pool_teachers_db.query("UPDATE "+gameCode+" SET game_status='"+game_status_60s_complete+"' WHERE gCode='"+gameCode+"'", gameCode, (err, results, fields)=>{
                                             io.in(gameCode).emit(gameCode+'_round_of_60sec_completed', game_status_60s_complete);  // tells all users to send thru their results for the run so it can be updated
                                         });
@@ -408,7 +500,12 @@ io.on('connection', (socket) => {
                                             if (game_status[2] == game_status[5]) { // therefore game has "finished" all rounds
                                                 let game_status_finished = "finished>>"+Date.now().toString()+">>"+game_status[2]+">>"+game_status[3]+">>"+game_status[4];
                                                 if (gameCode[0] == 'a' || gameCode[0] == 'b') { 
-                                                    client.SETEX(gameCode+'_game_status', 7200, game_status_finished).then( () => {
+                                                    client.SETEX(gameCode+'_game_status', 7200, game_status_finished, (error) => {
+                                                        if (error) {
+                                                            // Handle the error
+                                                        } else {
+                                                            // Continue with your logic
+                                                        }
                                                         pool_teachers_db.query("UPDATE "+gameCode+" SET game_status='"+game_status_finished+"' WHERE gCode='"+gameCode+"'", gameCode, (err, results, fields)=>{
                                                             io.in(gameCode).emit(gameCode+'_game_has_finished', 'game_has_finished');
                                                         });
@@ -421,7 +518,12 @@ io.on('connection', (socket) => {
                                                     let teacherID = teacherDetails.split('>>')[0];
 
                                                     pool_teachers_db.query("UPDATE teacherID_"+teacherID+" SET lastGameResults='"+last_game_results+"', lastGameRankings='"+last_game_ranking+Date.now().toString()+"|NotAllocated' WHERE ref='"+teacherID+"'", (error, results, fields)=>{
-                                                        client.SETEX(gameCode+'_game_status', 7200, game_status_finished).then( () => {
+                                                        client.SETEX(gameCode+'_game_status', 7200, game_status_finished, (error) => {
+                                                            if (error) {
+                                                                // Handle the error
+                                                            } else {
+                                                                // Continue with your logic
+                                                            }
                                                             pool_teachers_db.query("UPDATE "+gameCode+" SET game_status='"+game_status_finished+"' WHERE gCode='"+gameCode+"'", gameCode, (err, results, fields)=>{
                                                                 io.in(gameCode).emit(gameCode+'_game_has_finished', 'game_has_finished');
                                                             });
@@ -431,7 +533,12 @@ io.on('connection', (socket) => {
                                             }
                                             else if (game_status.length == 7) { // games has been "paused" by the teacher, noted due to addition of ">>paused"
                                                 let game_status_waiting = data[0].replace('>>paused','>>waiting');
-                                                client.SETEX(gameCode+'_game_status', 7200, game_status_waiting).then( () => { 
+                                                client.SETEX(gameCode+'_game_status', 7200, game_status_waiting, (error) => {
+                                                    if (error) {
+                                                        // Handle the error
+                                                    } else {
+                                                        // Continue with your logic
+                                                    }
                                                     pool_teachers_db.query("UPDATE "+gameCode+" SET game_status='"+game_status_waiting+"' WHERE gCode='"+gameCode+"'", gameCode, (err, results, fields)=>{
                                                         io.in(gameCode).emit(gameCode+'_game_paused', 'game_paused');
                                                     });
@@ -473,7 +580,12 @@ io.on('connection', (socket) => {
     socket.on('game_paused_by_teacher', (gameCode,socketResp) => { 
         retrieve_and_check_redisData(gameCode, (data) => { // data =[game_status, linked_users, user_results, user_ranking, teacher_details]
             let game_status_paused = data[0]+">>paused";  
-            client.SETEX(gameCode+'_game_status', 7200, game_status_paused).then( () => { 
+            client.SETEX(gameCode+'_game_status', 7200, game_status_pause, (error) => {
+                if (error) {
+                    // Handle the error
+                } else {
+                    // Continue with your logic
+                }
                 pool_teachers_db.query("UPDATE "+gameCode+" SET game_status='"+game_status_paused+"' WHERE gCode='"+gameCode+"'", gameCode, (err, results, fields)=>{
                     socketResp(game_status_paused);
                 });
@@ -487,19 +599,27 @@ io.on('connection', (socket) => {
             let game_status = data[0].split('>>');
 
             if (game_status[6] == 'paused') {
-                client.SETEX(gameCode+'_game_status', 7200, data[0].replace('>>paused','')).then( () => { 
-                    socketResp('gameCode_'+gameCode+'_turn_paused_OFF');
+                client.SETEX(gameCode + '_game_status', 7200, data[0].replace('>>paused', ''), (error) => {
+                  if (error) {
+                    // Handle the error
+                  } else {
+                    socketResp('gameCode_' + gameCode + '_turn_paused_OFF');
+                  }
                 });
-            }
+              }
             
-            if (game_status[6] == 'waiting') {
-                client.SETEX(gameCode+'_game_status', 7200, data[0].replace('>>waiting','')).then( () => { 
+              if (game_status[6] == 'waiting') {
+                client.SETEX(gameCode + '_game_status', 7200, data[0].replace('>>waiting', ''), (error) => {
+                  if (error) {
+                    // Handle the error
+                  } else {
                     get_ready_to_START_new_round(gameCode);
-                    socketResp('gameCode_'+gameCode+'_turn_pausedWAITING_OFF');
+                    socketResp('gameCode_' + gameCode + '_turn_pausedWAITING_OFF');
+                  }
                 });
-            }
+              }
+            });
         });
-    });
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // reBoot order //////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -508,7 +628,13 @@ io.on('connection', (socket) => {
 
     socket.on('reBoot_at_round_end', (gCode_Rnd) => { // reboot if no response after 63 sec game time
         
-        GET(gCode+'_game_status').then( (game_status) => {
+        client.get(gCode + '_game_status', (err, game_status) => {
+                   if (err) {
+                  // Handle the error here
+                  console.error(err);
+                 return;
+                }
+
             if (game_status.split('>>').length == 6) {                          // check if game has been 'paused' before reBooting the start of the next round
         
                 gCode = gCode_Rnd.split('|>|')[0];
@@ -516,14 +642,24 @@ io.on('connection', (socket) => {
         
                 let reBoot_atRoundEnd = false;
         
-                GET(gCode+'_last_reBoot').then( (last_reBoot) => { 
+                client.get(gCode + '_last_reBoot', (err, last_reBoot) => {
+                    if (err) {
+                        // Handle the error here
+                        console.error(err);
+                        return;
+                    }
                     
                     if (last_reBoot !== gRnd+'>reBoot_at_round_end') { reBoot_atRoundEnd = true; }
                     if (parseInt(gRnd) < parseInt(last_reBoot.split('>')[0])) { reBoot_atRoundEnd = false; }
                     
                     if (reBoot_atRoundEnd) {    
                         
-                        client.SETEX(gCode+'_last_reBoot', 7200, gRnd+'>reBoot_at_round_end').then( () => {
+                        client.SETEX(gCode+'_last_reBoot', 7200, gRnd+'>reBoot_at_round_end', (error) => {
+                            if (error) {
+                                // Handle the error
+                            } else {
+                                // Your original logic here
+                            }
                             get_ready_to_START_new_round(gCode);
                         });
                     }
@@ -538,14 +674,24 @@ io.on('connection', (socket) => {
 
         let reBoot_toStartGameAfterLoaded = false;
         
-        GET(gCode+'_last_reBoot').then( (last_reBoot) => {
+        client.get(gCode + '_last_reBoot', (err, last_reBoot) => {
+            if (err) {
+                // Handle the error here
+                console.error(err);
+                return;
+            }
             
             if (last_reBoot !== gRnd+'>reBoot_to_start_game_after_loaded') { reBoot_toStartGameAfterLoaded = true; }
             if (parseInt(gRnd) < parseInt(last_reBoot.split('>')[0])) { reBoot_toStartGameAfterLoaded = false; }
 
             if (reBoot_toStartGameAfterLoaded) {
 
-                client.SETEX(gCode+'_last_reBoot', 7200, gRnd+'>reBoot_to_start_game_after_loaded').then( () => {    
+                client.SETEX(gCode+'_last_reBoot', 7200, gRnd+'>reBoot_to_start_game_after_loaded', (error) => {
+                    if (error) {
+                        // Handle the error
+                    } else {
+                        // Your original logic here
+                    } 
     
                     retrieve_and_check_redisData(gCode, (data) => { // data =[game_status, linked_users, user_results, user_ranking, teacher_details]
             
@@ -558,7 +704,12 @@ io.on('connection', (socket) => {
                             }
                             else { game_status_running = "running>>"+Date.now().toString()+">>"+game_status[2]+">>"+game_status[3]+">>"+game_status[4]+">>"+game_status[5]; }
                         }
-                        client.SETEX(gCode+'_game_status', 7200, game_status_running).then( () => {
+                        client.SETEX(gCode+'_game_status', 7200, game_status_running, (error) => {
+                            if (error) {
+                                // Handle the error
+                            } else {
+                                // Your original logic here
+                            }
                             pool_teachers_db.query("UPDATE "+gCode+" SET game_status='"+game_status_running+"' WHERE gCode='"+gCode+"'", gCode, (err, results, fields)=>{
                                 io.in(gCode).emit(gCode+'_START', game_status_running);  // running
                             });
@@ -575,14 +726,24 @@ io.on('connection', (socket) => {
 
         let reBoot_after62secOfRunning = false;
 
-        GET(gCode+'_last_reBoot').then( (last_reBoot) => {
+        client.get(gCode + '_last_reBoot', (err, last_reBoot) => {
+            if (err) {
+                // Handle the error here
+                console.error(err);
+                return;
+            }
             
             if (last_reBoot !== gRnd+'>reBoot_after_62sec_of_running') { reBoot_after62secOfRunning = true; }
             if (parseInt(gRnd) < parseInt(last_reBoot.split('>')[0])) { reBoot_after62secOfRunning = false; }
 
             if (reBoot_after62secOfRunning) {
             
-                client.SETEX(gCode+'_last_reBoot', 7200, gRnd+'>reBoot_after_62sec_of_running').then( () => { 
+                client.SETEX(gCode+'_last_reBoot', 7200, gRnd+'>reBoot_after_62sec_of_running', (error) => {
+                    if (error) {
+                        // Handle the error
+                    } else {
+                        // Your original logic here
+                    }
 
                     retrieve_and_check_redisData(gCode, (data) => { // data =[game_status, linked_users, user_results, user_ranking, teacher_details]
                         let game_status = data[0].split('>>');       // [ state, timeStamp, round, maxGroupSize, currentGame, total_rnds ]
@@ -596,7 +757,12 @@ io.on('connection', (socket) => {
                                 game_status_60s_complete = "rnd_complete_results_transfer>>"+Date.now().toString()+">>"+game_status[2]+">>"+game_status[3]+">>"+game_status[4]+">>"+game_status[5];
                             }
                         }
-                        client.SETEX(gCode+'_game_status', 7200, game_status_60s_complete).then( () => {
+                        client.SETEX(gCode+'_game_status', 7200, game_status_60s_complete, (error) => {
+                            if (error) {
+                                // Handle the error
+                            } else {
+                                // Your original logic here
+                            }
                             pool_teachers_db.query("UPDATE "+gCode+" SET game_status='"+game_status_60s_complete+"' WHERE gCode='"+gCode+"'", gCode, (err, results, fields)=>{
                                 io.in(gCode).emit(gCode+'_round_of_60sec_completed', game_status_60s_complete);  // tells all users to send thru their results for the run so it can be updated
                             });
@@ -615,7 +781,12 @@ io.on('connection', (socket) => {
                                 if (game_status[2] == game_status[5]) { // therefore game has "finished" all rounds
                                     let game_status_finished = "finished>>"+Date.now().toString()+">>"+game_status[2]+">>"+game_status[3]+">>"+game_status[4];
                                     if (gCode[0] == 'a' || gCode[0] == 'b') { 
-                                        client.SETEX(gCode+'_game_status', 7200, game_status_finished).then( () => {
+                                        client.SETEX(gCode+'_game_status', 7200, game_status_finished, (error) => {
+                                            if (error) {
+                                                // Handle the error
+                                            } else {
+                                                // Your original logic here
+                                            }
                                             pool_teachers_db.query("UPDATE "+gCode+" SET game_status='"+game_status_finished+"' WHERE gCode='"+gCode+"'", gCode, (err, results, fields)=>{
                                                 io.in(gCode).emit(gCode+'_game_has_finished', 'game_has_finished');
                                             });
@@ -628,7 +799,12 @@ io.on('connection', (socket) => {
                                         let teacherID = teacherDetails.split('>>')[0];
             
                                         pool_teachers_db.query("UPDATE teacherID_"+teacherID+" SET lastGameResults='"+last_game_results+"', lastGameRankings='"+last_game_ranking+Date.now().toString()+"|NotAllocated' WHERE ref='"+teacherID+"'", (error, results, fields)=>{
-                                            client.SETEX(gCode+'_game_status', 7200, game_status_finished).then( () => {
+                                            client.SETEX(gCode+'_game_status', 7200, game_status_finished, (error) => {
+                                                if (error) {
+                                                    // Handle the error
+                                                } else {
+                                                    // Your original logic here
+                                                }
                                                 pool_teachers_db.query("UPDATE "+gCode+" SET game_status='"+game_status_finished+"' WHERE gCode='"+gCode+"'", gCode, (err, results, fields)=>{
                                                     io.in(gCode).emit(gCode+'_game_has_finished', 'game_has_finished');
                                                 });
@@ -638,7 +814,12 @@ io.on('connection', (socket) => {
                                 }
                                 else if (game_status.length == 7) { // games has been "paused" by the teacher, noted due to addition of ">>paused"
                                     let game_status_waiting = data[0].replace('>>paused','>>waiting');
-                                    client.SETEX(gCode+'_game_status', 7200, game_status_waiting).then( () => { 
+                                    client.SETEX(gCode+'_game_status', 7200, game_status_waiting, (error) => {
+                                        if (error) {
+                                            // Handle the error
+                                        } else {
+                                            // Your original logic here
+                                        }
                                         pool_teachers_db.query("UPDATE "+gCode+" SET game_status='"+game_status_waiting+"' WHERE gCode='"+gCode+"'", gCode, (err, results, fields)=>{
                                             io.in(gCode).emit(gCode+'_game_paused', 'game_paused');
                                         });
@@ -662,7 +843,7 @@ io.on('connection', (socket) => {
     });
 
     //##############################################################################################
-    /////// ### following socket connections are from the teacher "assign student_tasks" page //////////////
+    /////// ### following socket connections are from the teacher "assign student tasks" page //////////////
 
     ////////////////////////////////////////////////////////////////////////////
     socket.on('fetch_my_students', (idKey,socketResp) => { 
@@ -678,7 +859,7 @@ io.on('connection', (socket) => {
         });
     });
     ////////////////////////////////////////////////////////////////////////////
-    socket.on('update_student_tasks', (params,socketResp) => { let homeWork = params.student_tasks+','+Date.now();  // params = {"userRef":ref,"student_tasks":student_tasks,"teacherRef":idKey}
+    socket.on('update_student_tasks', (params,socketResp) => { let homeWork = params.student_tasks;  // let homeWork = params.student_tasks+','+Date.now();  // params = {"userRef":ref,"student_tasks":student_tasks,"teacherRef":idKey}
         pool_users_db.query("UPDATE userID_"+params.userRef+"_activities SET activityNotes='"+homeWork+"' WHERE activity='"+params.teacherRef+"_tasks'", params.userRef, (error, results, fields)=>{
             if (!error) { socketResp('success|'+params.userRef); }
         });
@@ -700,9 +881,15 @@ io.on('connection', (socket) => {
         });
     });
     ////////////////////////////////////////////////////////////////////////////
+    socket.on('fetch_all_student_activity_data', (ref,socketResp) => {
+        pool_users_db.query("SELECT activity, attempts FROM userID_"+ref+"_activities WHERE activityNotes='thisActivity'", (error, results, fields)=>{
+            if (!error) { socketResp(results); }
+        });
+    });    
+    ////////////////////////////////////////////////////////////////////////////
     socket.on('update_taskDueDays', (task_due_days) => { ref = task_due_days.split('|>>|')[0];  taskDueDays = task_due_days.split('|>>|')[1]; // ref|>>|1|>|2|>|3
         pool_teachers_db.query("UPDATE teacherID_"+ref+" SET taskDueDays='"+taskDueDays+"' WHERE ref='"+ref+"'");
-    });    
+    });
     //##############################################################################################
     /////// ### following socket connection are from the teacher "student_tasks" page //////////////    
     socket.on('delete_single_student', (params,socketResp) => { 
@@ -797,8 +984,11 @@ io.on('connection', (socket) => {
                     if ( results.length > 0 ) { socketResp('check, looks like it has been used by another TEACHER!!!!!'); }
                     else {
                         pass_2 = pass_1;
-                        pool_users_db.query("UPDATE aaaa_Data_Table_of_Users SET userName='"+pass_2.userNameNEW+"' WHERE idKey='"+pass_2.ref+"'", (error, results, fields)=>{
-                            socketResp('uniqueUserName_updatedSuccessfully');
+                        pool_users_db.query("UPDATE aaaa_Data_Table_of_Users SET userName='"+pass_2.userNameNEW+"' WHERE idKey='"+pass_2.ref+"'", pass_2, (error, results, fields)=>{
+                            pass_3 = pass_2;
+                            pool_users_db.query("UPDATE userID_"+pass_3.ref+"_activities SET userName='"+pass_3.userNameNEW+"' WHERE activity='history'", (error, results, fields)=>{
+                                socketResp('uniqueUserName_updatedSuccessfully');
+                            });
                         });
                     }
                 });
@@ -809,30 +999,48 @@ io.on('connection', (socket) => {
     //##############################################################################################
     /////// ### following socket connection are from the student "play_game" page //////////////////
 
-    socket.on('join_teacher_gameRoom', (gameCode,socketResp) => { 
+    socket.on('join_teacher_gameRoom', (gameCode, socketResp) => {
         socket.join(gameCode);
-
-        client.MGET([gameCode+'_game_status',gameCode+'_linked_users']).then( (data) => {
-            if (data[0] !== null && data[1] !== null) {
-                socketResp( data[0]+'>>>>'+data[1] );
-            }
-        });
+    
+        mgetAsync([gameCode+'_game_status', gameCode+'_linked_users'])
+            .then((data) => {
+                if (data[0] !== null && data[1] !== null) {
+                    socketResp(data[0]+'>>>>'+data[1]);
+                }
+            })
+            .catch((error) => {
+                console.error(error);
+                // Handle the error in a way that makes sense for your application
+            });
     });
+    
+    
+    socket.on('update_user_gameScore', (gameRound_user_results) => {          // gameCode = userRef>>score>>respTime>>round>>user>>groupColour|  
+    let game_userResults = gameRound_user_results.split('=');
+    let gameCode = game_userResults[0];
+    let userResults = game_userResults[1];
 
-    socket.on('update_user_gameScore', (gameRound_user_results) => {            // gameCode = userRef>>score>>respTime>>round>>user>>groupColour|
-
-        let game_userResults = gameRound_user_results.split('=');
-        let gameCode = game_userResults[0];
-        let userResults = game_userResults[1];
-
-        client.APPEND(gameCode+'_user_results', userResults);
+    client.append(gameCode+'_user_results', userResults, (err) => {
+        if (err) {
+            console.error(err);
+            return;
+        }
         // client.APPEND(gameCode+'_user_results', userResults).then( () => { });
     });
+});
 
-    socket.on('update_user_rankings', (gameRound_user_ranking) => { gCode_gRndUserRankings =  gameRound_user_ranking.split('=');
-        client.APPEND(gCode_gRndUserRankings[0]+'_user_ranking', gCode_gRndUserRankings[1]);
+socket.on('update_user_rankings', (gameRound_user_ranking) => { 
+    let gCode_gRndUserRankings =  gameRound_user_ranking.split('=');
+
+    client.append(gCode_gRndUserRankings[0]+'_user_ranking', gCode_gRndUserRankings[1], (err) => {
+        if (err) {
+            console.error(err);
+            return;
+        }
         // client.APPEND(gCode_gRndUserRankings[0]+'_user_ranking', gCode_gRndUserRankings[1]).then( () => { });
     });
+});
+
 
     //##############################################################################################
     ///// ### following socket connection are from the student "teacher/registration" page /////////
@@ -1019,9 +1227,10 @@ io.on('connection', (socket) => {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-app.get('/', (req, res) => { res.render('main_menu', { ref: 'nonMember', user: 'guest', userName: '' }); });
+app.get('/', (req, res) => { console.log('res from app.get'); res.render('main_menu', { ref: 'nonMember', user: 'guest', userName: '' }); });
 
 app.get('/student_log_in', (req, res) => { res.render('student_log_in', { ref: 'nonMember', user: 'guest', alert_username: '', alert_password: '' }); });
+
 app.get('/log_in', (req, res) => { res.render('student_log_in', { ref: 'nonMember', user: 'guest', alert_username: '', alert_password: '' }); });
 
 app.get('/teacher_log_in', (req, res) => { res.render('teacher/teacher_log_in', { alert_username: '', alert_password: '' }); });
@@ -1063,7 +1272,7 @@ app.get('/teacher/:ref', (req, res) => { let ref = req.params.ref;
 ////////////////////////////////////////////////////////////////////////////////
 app.get('/parent/:ref', (req, res) => { let ref = req.params.ref;
 
-    if (ref == 'nonMember') { res.render('parent/parent_menu', {ref: 'nonMember', user: 'guest', game: 'none', maxStudentGroup: '4' }); }
+    if (ref == 'nonMember') { res.render('parent/parent_menu', {ref: 'nonMember', user: 'guest', teacherName: 'Guest' }); }
     else {
         pool_teachers_db.query("SELECT firstName, teacherName FROM teacherID_"+ref+" WHERE ref='"+ref+"' LIMIT 1", ref, (error, results, fields)=>{
             if (error || !results || results == undefined) { }
@@ -1279,7 +1488,14 @@ app.get('/submit_game_code/:ref/:user', (req, res) => { // this is route to dire
             if (results[0].gameCode == 'none') { res.render('submit_game_code', { ref:params.ref, user:params.user, teacherLinks:results[0].activityNotes, alert_gameCode:'' }); }
             else { 
                 // it goes here if student has already been logged in to game but got out BUT still has a recorded gameCode in their db.
-                GET(results[0].gameCode+'_game_status').then( (gameStatus) => { gState = gameStatus.split('>>')[0];
+                client.get(results[0].gameCode + '_game_status', (err, gameStatus) => {
+                    if (err) {
+                        // Handle the error here
+                        console.error(err);
+                        return;
+                    }
+                    gState = gameStatus.split('>>')[0];
+                
                     if (gState !== 'deleted' || gState !== 'finished') {
                         // then get redisData of gameCode_student_groups and send through as well.  if it equals 'none' then either no student groupings.  if it doesn't exist then it is a single game
                         // in play_game the student worls out which group it is in, or none
@@ -1437,7 +1653,11 @@ app.get('/teacher/get_game_code/:ref/:user', (req, res) => { // res.send('in /te
                 let gameCode = alpha[dig1]+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
                 thisTeacher.gameCode = gameCode;
                     
-                GET(gameCode+'_teacher_details').then( (isResults) => {  // res.send(isResults);
+                client.get(gameCode + '_teacher_details', (err, isResults) => {
+                    if (err) {
+                        console.error(err);
+                        return;
+                    }  // res.send(isResults);
                     if (isResults !== null || gameCode == 'arse' || gameCode=='cunt' || gameCode=='fuck' || gameCode=='dick' || gameCode=='slut' || gameCode=='fukk' || gameCode=='shit' || gameCode=='kunt' || gameCode=='piss' || gameCode=='pooo' ) { 
                         getGameCode(thisTeacher);  // try again for a unique gameCode
                     }
@@ -1449,31 +1669,55 @@ app.get('/teacher/get_game_code/:ref/:user', (req, res) => { // res.send('in /te
 
                         gCode = pass_1.gameCode;        // res.send(gCode);
 
-                        client.SETEX(gCode+'_teacher_details', 7200, teacher_details).then( (teacherDetailsState) => {
-                            client.SETEX(gCode+'_linked_users', 7200, '|').then( (linkedState)      => {
-                                client.SETEX(gCode+'_user_results', 7200, '').then( (userResultsState) => {
-                                    client.SETEX(gCode+'_user_ranking', 7200, '').then( (userRankingState) => {
-                                        client.SETEX(gCode+'_game_status', 7200, game_status).then( (gStatusState)     => {
-                                            client.SETEX(gCode+'_last_reBoot', 7200, 'none').then( () => { 
-                                                pool_teachers_db.query("INSERT INTO aaaa_List_of_gameCodes VALUES('"+pass_1.gameCode+"','"+Date.now().toString()+"','"+pass_1.ref+"','"+pass_1.teacherName+"','"+pass_1.arrayOfStudents+"','ax1')", pass_1, (error, results, fields)=>{
+                        client.SETEX(gCode + '_teacher_details', 7200, teacher_details, (error1) => {
+                            if (error1) {
+                              // Handle the error
+                            } else {
+                              client.SETEX(gCode + '_linked_users', 7200, '|', (error2) => {
+                                if (error2) {
+                                  // Handle the error
+                                } else {
+                                  client.SETEX(gCode + '_user_results', 7200, '', (error3) => {
+                                    if (error3) {
+                                      // Handle the error
+                                    } else {
+                                      client.SETEX(gCode + '_user_ranking', 7200, '', (error4) => {
+                                        if (error4) {
+                                          // Handle the error
+                                        } else {
+                                          client.SETEX(gCode + '_game_status', 7200, game_status, (error5) => {
+                                            if (error5) {
+                                              // Handle the error
+                                            } else {
+                                              client.SETEX(gCode + '_last_reBoot', 7200, 'none', (error6) => {
+                                                if (error6) {
+                                                  // Handle the error
+                                                } else {
+                                                  pool_teachers_db.query("INSERT INTO aaaa_List_of_gameCodes VALUES('" + pass_1.gameCode + "','" + Date.now().toString() + "','" + pass_1.ref + "','" + pass_1.teacherName + "','" + pass_1.arrayOfStudents + "','ax1')", pass_1, (error, results, fields) => {
                                                     let pass_2 = pass_1;
-                                                    pool_teachers_db.query("UPDATE teacherID_"+pass_2.ref+" SET gameCode='"+pass_2.gameCode+"' WHERE ref='"+pass_2.ref+"'", pass_2, (error, results, fields)=>{
-                                                        let pass_3 = pass_2;
-                                                        pool_teachers_db.query("CREATE TABLE "+pass_3.gameCode+"(gCode varchar(10) PRIMARY KEY, game_status text, linked_users text, user_results text, user_ranking text, teacher_details text)", pass_3, (error, results, fields)=>{
-                                                            let pass_4 = pass_3;
-                                                            pool_teachers_db.query("INSERT INTO "+pass_4.gameCode+" VALUES('"+pass_4.gameCode+"','"+game_status+"','|','3','4','"+teacher_details+"')", pass_4, (error, results, fields)=>{ 
-                                                                res.redirect('/teacher/'+pass_4.ref);
-                                                            });
-                                                        });                                                                
-                                                    });    
-                                                });
-                                            });
-                                        });
-                                    });
-                                });
-                            });
-                        });
-                    }
+                                                    pool_teachers_db.query("UPDATE teacherID_" + pass_2.ref + " SET gameCode='" + pass_2.gameCode + "' WHERE ref='" + pass_2.ref + "'", pass_2, (error, results, fields) => {
+                                                      let pass_3 = pass_2;
+                                                      pool_teachers_db.query("CREATE TABLE " + pass_3.gameCode + "(gCode varchar(10) PRIMARY KEY, game_status text, linked_users text, user_results text, user_ranking text, teacher_details text)", pass_3, (error, results, fields) => {
+                                                        let pass_4 = pass_3;
+                                                        pool_teachers_db.query("INSERT INTO " + pass_4.gameCode + " VALUES('" + pass_4.gameCode + "','" + game_status + "','|','3','4','" + teacher_details + "')", pass_4, (error, results, fields) => {
+                                                          res.redirect('/teacher/' + pass_4.ref);
+                                                        });
+                                                      });
+                                                    });
+                                                  });
+                                                }
+                                              });
+                                            }
+                                          });
+                                        }
+                                      });
+                                    }
+                                  });
+                                }
+                              });
+                            }
+                          });
+                    }  
                 });
                     
                 // });
@@ -1504,7 +1748,11 @@ app.get('/teacher/get_group_games_code/:ref/:user', (req, res) => {
                 let gameCode = 'c'+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
                 thisTeacher.gameCode = gameCode;
 
-                GET(gameCode+'_teacher_details').then( (isResults) => { 
+                client.get(gameCode + '_teacher_details', (err, isResults) => {
+                    if (err) {
+                        console.error(err);
+                        return;
+                    }
                     if (isResults !== null || gameCode=='arse' || gameCode=='cunt' || gameCode=='fuck' || gameCode=='dick' || gameCode=='slut' || gameCode=='fukk' || gameCode=='shit' || gameCode=='kunt' || gameCode=='piss' || gameCode=='pooo' ) { 
                         getGameCode(thisTeacher);  // try again for a unique gameCode
                     }
@@ -1516,30 +1764,54 @@ app.get('/teacher/get_group_games_code/:ref/:user', (req, res) => {
                         let teacher_details = pass_1.ref+'>>'+pass_1.teacherName+'>>'+pass_1.classPW+'>>'+pass_1.arrayOfStudents;
                         gCode = pass_1.gameCode;
 
-                        client.SETEX(gCode+'_teacher_details', 7200, teacher_details).then( (teacherDetailsState) => { 
-                            client.SETEX(gCode+'_linked_users', 7200, '|').then( (linkedState) => {
-                                client.SETEX(gCode+'_user_results', 7200, '').then( (userResultsState) => {
-                                    client.SETEX(gCode+'_user_ranking', 7200, '').then( (userRankingState) => {
-                                        client.SETEX(gCode+'_game_status', 7200, game_status).then( (gStatusState) => {
-                                            client.SETEX(gCode+'_last_reBoot', 7200, 'none').then( () => {
-                                                pool_teachers_db.query("INSERT INTO aaaa_List_of_gameCodes VALUES('"+pass_1.gameCode+"','"+Date.now().toString()+"','"+pass_1.ref+"','"+pass_1.teacherName+"','"+pass_1.arrayOfStudents+"','ax1')", pass_1, (error, results, fields)=>{
-                                                    let pass_2 = pass_1;
-                                                    pool_teachers_db.query("UPDATE teacherID_"+pass_2.ref+" SET gameCode='"+pass_2.gameCode+"' WHERE ref='"+pass_2.ref+"'", pass_2, (error, results, fields)=>{
-                                                        let pass_3 = pass_2;
-                                                        pool_teachers_db.query("CREATE TABLE "+pass_3.gameCode+"(gCode varchar(10) PRIMARY KEY, game_status text, linked_users text, user_results text, user_ranking text, teacher_details text)", pass_3, (error, results, fields)=>{
-                                                            let pass_4 = pass_3;
-                                                            pool_teachers_db.query("INSERT INTO "+pass_4.gameCode+" VALUES('"+pass_4.gameCode+"','"+game_status+"','|','3','4','"+teacher_details+"')", pass_4, (error, results, fields)=>{ 
-                                                                res.redirect('/teacher_group_games/'+pass_4.ref);
-                                                            });
-                                                        });                                                                
-                                                    });    
-                                                });
-                                            });
-                                        });
-                                    });
-                                });
+                       client.SETEX(gCode + '_teacher_details', 7200, teacher_details, (error1) => {
+  if (error1) {
+    // Handle the error
+  } else {
+    client.SETEX(gCode + '_linked_users', 7200, '|', (error2) => {
+      if (error2) {
+        // Handle the error
+      } else {
+        client.SETEX(gCode + '_user_results', 7200, '', (error3) => {
+          if (error3) {
+            // Handle the error
+          } else {
+            client.SETEX(gCode + '_user_ranking', 7200, '', (error4) => {
+              if (error4) {
+                // Handle the error
+              } else {
+                client.SETEX(gCode + '_game_status', 7200, game_status, (error5) => {
+                  if (error5) {
+                    // Handle the error
+                  } else {
+                    client.SETEX(gCode + '_last_reBoot', 7200, 'none', (error6) => {
+                      if (error6) {
+                        // Handle the error
+                      } else {
+                        pool_teachers_db.query("INSERT INTO aaaa_List_of_gameCodes VALUES('" + pass_1.gameCode + "','" + Date.now().toString() + "','" + pass_1.ref + "','" + pass_1.teacherName + "','" + pass_1.arrayOfStudents + "','ax1')", pass_1, (error, results, fields) => {
+                          let pass_2 = pass_1;
+                          pool_teachers_db.query("UPDATE teacherID_" + pass_2.ref + " SET gameCode='" + pass_2.gameCode + "' WHERE ref='" + pass_2.ref + "'", pass_2, (error, results, fields) => {
+                            let pass_3 = pass_2;
+                            pool_teachers_db.query("CREATE TABLE " + pass_3.gameCode + "(gCode varchar(10) PRIMARY KEY, game_status text, linked_users text, user_results text, user_ranking text, teacher_details text)", pass_3, (error, results, fields) => {
+                              let pass_4 = pass_3;
+                              pool_teachers_db.query("INSERT INTO " + pass_4.gameCode + " VALUES('" + pass_4.gameCode + "','" + game_status + "','|','3','4','" + teacher_details + "')", pass_4, (error, results, fields) => {
+                                res.redirect('/teacher_group_games/' + pass_4.ref);
+                              });
                             });
+                          });
                         });
+                      }
+                    });
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
+    });
+  }
+});
                     }
                 });
             }; 
@@ -1562,7 +1834,11 @@ function delete_game(params,path,res) {
             pool_teachers_db.query("DROP TABLE "+pass_1.gameCode, pass_1, (error, results, fields)=>{ 
                 let pass_2 = pass_1;
                 
-                GET(pass_2.gameCode+'_linked_users').then( (linked_users) => {
+                client.get(pass_2.gameCode + '_linked_users', (err, linked_users) => {
+                    if (err) {
+                        console.error(err);
+                        return;
+                    }
                     if (linked_users !== '|') {
                         let linkedUsers = linked_users.split('|');
                         
@@ -1571,7 +1847,7 @@ function delete_game(params,path,res) {
                         }
                     }
                     let gC = pass_2.gameCode;
-                    client.DEL([gC+'_teacher_details',gC+'_linked_users',gC+'_user_results',gC+'_user_ranking',gC+'_game_status',gC+'_last_reBoot']).then( () => {
+                    delAsync(gC+'_teacher_details', gC+'_linked_users', gC+'_user_results', gC+'_user_ranking', gC+'_game_status', gC+'_last_reBoot').then( () => {
                         if( path == 'delete_game_redirect_to_myStudents') { res.redirect('/teacher/my_students/'+params.ref+'/post_game'); }
                         else { res.redirect('/teacher/'+params.ref); }
                     });
@@ -1696,7 +1972,11 @@ app.post('/link_user_to_gameCode/:ref/:user/:gameCode', (req, res) => { let para
             pool_users_db.query("UPDATE userID_"+params.ref+"_activities SET gameCode='"+params.gameCode+"' WHERE activity='teacherCodes'", params, (error, results, fields)=>{ 
                 let params_2 = params;
                 
-                GET(params_2.gameCode+'_linked_users').then( (linked_users) => { 
+                client.get(params_2.gameCode + '_linked_users', (err, linked_users) => {
+                    if (err) {
+                        console.error(err);
+                        return;
+                    }
                     
                     if (!linked_users) { 
                         pool_teachers_db.query("SELECT * FROM "+params_2.gameCode, params, (err, results, fields)=>{
@@ -1717,7 +1997,12 @@ app.post('/link_user_to_gameCode/:ref/:user/:gameCode', (req, res) => { let para
                         if (user_NOT_linked) {
                             let linkedUsersAppended = linked_users+thisRefUser+'|';
 
-                            client.SETEX(params_2.gameCode+'_linked_users', 7200, linkedUsersAppended).then( () => { // start_clicked    
+                            client.SETEX(params_2.gameCode+'_linked_users', 7200, linkedUsersAppended, (error) => {
+                                if (error) {
+                                    // Handle the error
+                                } else {
+                                    // Your original logic here
+                                } // start_clicked    
 
                                 pool_teachers_db.query("UPDATE "+params_2.gameCode+" SET linked_users='"+linkedUsersAppended+"' WHERE gCode='"+params_2.gameCode+"'", params_2, (err, results, fields)=>{
                                     res.render('teacher/play_game_230503', {gameCode:params_2.gameCode,ref:params_2.ref,user:params_2.user});
@@ -1734,7 +2019,11 @@ app.post('/link_user_to_gameCode/:ref/:user/:gameCode', (req, res) => { let para
 ////////////////////////////////////////////////////////////////////////////////
 app.post('/link_casual_user_to_gameCode', (req, res) => { // req.body = .ref, .user, .currentLinkedTeachers, .gameCode
 
-    GET(req.body.gameCode+'_teacher_details').then( (results) => { // let teacher_details = teacherDetails.split('>>');
+    client.get(req.body.gameCode + '_teacher_details', (err, results) => {
+        if (err) {
+            console.error(err);
+            return;
+        } // let teacher_details = teacherDetails.split('>>');
 
         if ( !results ) { res.render('submit_game_code', { ref: 'nonMember', user: 'guest', teacherLinks: 'none', alert_gameCode: 'Not a valid Game Code, see your teacher.' }); }
 
@@ -1742,7 +2031,11 @@ app.post('/link_casual_user_to_gameCode', (req, res) => { // req.body = .ref, .u
         params.ref = params.gameCode + Math.floor(Math.random() * 9999).toString();  // else ref = logged-in idKey / ref
 
         let getUniqueRef = function(params) {
-            GET(params.gameCode+'_linked_users').then( (linked_users) => {
+            client.get(params.gameCode + '_linked_users', (err, linked_users) => {
+                if (err) {
+                    console.error(err);
+                    return;
+                }
                 
                 let isUniqueRef = true;
                 
@@ -1754,8 +2047,12 @@ app.post('/link_casual_user_to_gameCode', (req, res) => { // req.body = .ref, .u
                 }
                 if (isUniqueRef) {
                     linked_users = linked_users+params.ref+'>'+params.user+'|'
-                    client.APPEND(params.gameCode+'_linked_users', params.ref+'>'+params.user+'|').then( () => {  // this addes the user to the 'gameCode_linked_users'
-                        res.render('teacher/play_game_230503', {gameCode:params.gameCode,ref:params.ref,user:params.user});
+                    client.append(params.gameCode+'_linked_users', params.ref+'>'+params.user+'|', (err) => {  // this addes the user to the 'gameCode_linked_users'
+                                            if (err) {
+                        console.error(err);
+                        return;
+                    }
+                    res.render('teacher/play_game_230503', {gameCode:params.gameCode,ref:params.ref,user:params.user});
                     });
                 }
                 else {
@@ -1967,6 +2264,7 @@ app.get('/my_place_fetch/retrieve_user_details_and_imageIDs/:ref/:scene', (req, 
 });
 ////////////////////////////////////////////////////////////////////////////////
 app.get('/my_place_fetch/record_purchased_imageID/:getUrlStr', (req, res) => { let params = req.params.getUrlStr.split('&');  //ref,scene,imageID,x_location,y_location,imageHeight,zIndexNext,invertX,newCredit
+    // res.send(params);
 
     let idKey = params[0];      let scene = params[1];      let imageID =params[2];     let x_pos = params[3];      let y_pos = params[4];
     let height =params[5];      let z_Index = params[6];    let invertX = params[7];    let credit =params[8];   
@@ -1998,30 +2296,53 @@ app.get('/my_place/change_scene/:ref/:user/:credit', (req, res) => { // let para
 ////////////// REDIS ///////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 app.get('/node_redisONtt/set/:key/:value', (req,res) => {
-    client.SETEX(req.params.key, 600, req.params.value).then( () => {
+    client.SETEX(req.params.key, 600, req.params.value, (error) => {
+    if (error) {
+        // Handle the error
+    } else {
+        // Your original logic here
+    }
         res.send('key='+req.params.key+' was SET for 600sec to '+req.params.value);
     });
 });
 
 app.get('/node_redisONtt/get/:key', (req,res) => {
-    GET(req.params.key).then( (value) => {
+    client.get(req.params.key, (err, value) => {
+        if (err) {
+            console.error(err);
+            return;
+        }
         res.send(req.params.key+' : '+value);
     });
 });
 
-app.get('/node_redisONtt/mget/:key1/:key2/:key3', (req,res) => {
-    
+app.get('/node_redisONtt/mget/:key1/:key2/:key3', (req, res) => {
+
     let key1 = req.params.key1;
     let key2 = req.params.key2;
     let key3 = req.params.key3;
 
-    client.MGET([key1, key2, key3]).then( (value) => {
-        res.send(value);
-    });
+    mgetAsync([key1, key2, key3])
+        .then((value) => {
+            res.send(value);
+        })
+        .catch((error) => {
+            console.error(error);
+            // Handle the error in a way that makes sense for your application
+            res.status(500).send({error: "Error retrieving data from Redis"});
+        });
 });
 
+
 app.get('/node_redisONtt/append/:key/:value', (req,res) => {
-    client.APPEND(req.params.key, req.params.value).then( (value) => {
+    client.append(req.params.key, req.params.value, (err) => {
+        if (err) {
+            console.error(err);
+            return;
+        }
         res.send(req.params.key+' : '+req.params.value);
     });
 });
+
+
+console.log('here we are at END of app as of 230522 at '+Date.now().toString() );
