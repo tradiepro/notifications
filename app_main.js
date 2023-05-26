@@ -41,7 +41,7 @@ app.set('view engine', 'ejs');
 app.use(express.static('public'));
 app.use(express.urlencoded({ extended: false }));
 
-const host = '0.0.0.0'; // Listen on all available network interfaces
+const host = '0.0.0.0';
 const port = process.env.PORT || 5000;
 
 server.listen(port, host, function () { console.log(`app (as of 230522) listening on ${host}:${port}`); });
