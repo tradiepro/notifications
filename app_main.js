@@ -12,9 +12,6 @@ io.on('connection', (socket) => { console.log(socket.id) });
 console.log('is there a response from socket "connection"?');
 
 const client = require('redis').createClient();                                 // ### redis setup ###
-const util = require('util');
-const mgetAsync = util.promisify(client.MGET).bind(client);
-const delAsync = util.promisify(client.del).bind(client);
 
 client.on('connect', () => { console.log('Connected to Redis as of 230522'); });
 client.on('error', (err) => { console.log('Error connecting to Redis:', err); });
@@ -51,7 +48,13 @@ io.on('connection', (socket) => { console.log('socket connection established in 
     //#####################################################################################################
     /////// ### following socket connection are from the student "submit_game_code" page //////////////////
     socket.on('check_type_of_gCode', (gCode, socketResp) => {
-        mgetAsync([gCode+'_game_status',gCode+'_teacher_details']).then( (data) => {
+        client.MGET([gCode+'_game_status',gCode+'_teacher_details'], (err, data) => {
+            if (err) {
+                // handle error here
+                console.error(err);
+                return;
+            }
+        
             if (data[0] !== null) { 
                 let gState = data[0].split('>>')[0];
                 if (gState !== 'deleted' || gState !== 'finished') { // [ state, timeStamp, round, maxGroupSize, currentGame, total_rnds ]
@@ -62,9 +65,6 @@ io.on('connection', (socket) => { console.log('socket connection established in 
             } else { 
                 socketResp(null); 
             }
-        }).catch(err => {
-            // handle error here
-            console.error(err);
         });
     });
     
@@ -242,8 +242,12 @@ io.on('connection', (socket) => { console.log('socket connection established in 
 
 
     function retrieve_and_check_redisData(gCode,returnRedis) {
-        mgetAsync([gCode+'_game_status', gCode+'_linked_users', gCode+'_user_results', gCode+'_user_ranking', gCode+'_teacher_details'])
-        .then((data) => {
+        client.MGET([gCode+'_game_status', gCode+'_linked_users', gCode+'_user_results', gCode+'_user_ranking', gCode+'_teacher_details'], (err, data) => {
+            if (err) {
+                // handle error here
+                console.error(err);
+                return;
+            }        
 
             if (data[0] == null || data[1] == null || data[2] == null || data[3] == null || data[4] == null ) {
                 
@@ -284,13 +288,14 @@ io.on('connection', (socket) => { console.log('socket connection established in 
                                         }
                                                     // data = [game_status, linked_users, user_results, user_ranking, teacher_details]
                                                     
-                                            mgetAsync([gCode+'_game_status',gCode+'_linked_users',gCode+'_user_results',gCode+'_user_ranking',gCode+'_teacher_details']).then( (data) => {
+                                        client.MGET([gCode+'_game_status',gCode+'_linked_users',gCode+'_user_results',gCode+'_user_ranking',gCode+'_teacher_details'], (err, data) => {
+                                            if (err) {
+                                                // handle error here
+                                                console.error(err);
+                                                return;
+                                            }
                                             returnRedis(data);
-                                        }).catch((error) => {
-                                            console.error(error);
-                                            // Handle the error in a way that makes sense for your application
                                         });
-                                        
                                     });                
                                 });
                             });
@@ -299,11 +304,9 @@ io.on('connection', (socket) => { console.log('socket connection established in 
 
                 });                
             }
-            else { returnRedis(data); }
-        })
-        .catch((error) => {
-            console.error(error);
-            // Handle the error in a way that makes sense for your application
+            else { 
+                returnRedis(data); 
+            }
         });
     }
 
@@ -1002,17 +1005,17 @@ io.on('connection', (socket) => { console.log('socket connection established in 
     socket.on('join_teacher_gameRoom', (gameCode, socketResp) => {
         socket.join(gameCode);
     
-        mgetAsync([gameCode+'_game_status', gameCode+'_linked_users'])
-            .then((data) => {
-                if (data[0] !== null && data[1] !== null) {
-                    socketResp(data[0]+'>>>>'+data[1]);
-                }
-            })
-            .catch((error) => {
-                console.error(error);
-                // Handle the error in a way that makes sense for your application
-            });
-    });
+        client.MGET([gameCode+'_game_status', gameCode+'_linked_users'], (err, data) => {
+            if (err) {
+                // handle error here
+                console.error(err);
+                return;
+            }
+            if (data[0] !== null && data[1] !== null) {
+                socketResp(data[0]+'>>>>'+data[1]);
+            }
+        });
+    });    
     
     
     socket.on('update_user_gameScore', (gameRound_user_results) => {          // gameCode = userRef>>score>>respTime>>round>>user>>groupColour|  
@@ -1846,11 +1849,20 @@ function delete_game(params,path,res) {
                             pool_users_db.query("UPDATE userID_"+user+"_activities SET gameCode='none' WHERE activity='teacherCodes'");
                         }
                     }
+                    
                     let gC = pass_2.gameCode;
-                    delAsync(gC+'_teacher_details', gC+'_linked_users', gC+'_user_results', gC+'_user_ranking', gC+'_game_status', gC+'_last_reBoot').then( () => {
+                    client.del(gC+'_teacher_details', gC+'_linked_users', gC+'_user_results', gC+'_user_ranking', gC+'_game_status', gC+'_last_reBoot', (err) => {
+                        if (err) {
+                            console.error(err);
+                            return;
+                        }
                         if( path == 'delete_game_redirect_to_myStudents') { res.redirect('/teacher/my_students/'+params.ref+'/post_game'); }
-                        else { res.redirect('/teacher/'+params.ref); }
-                    });
+                        else { res.redirect('/teacher/'+pass_2.ref); }
+                    });                    
+                    
+                    // if( path == 'delete_game_redirect_to_myStudents') { res.redirect('/teacher/my_students/'+params.ref+'/post_game'); }
+                    // else { res.redirect('/teacher/'+pass_2.ref); }                    
+                    
                 });
             });
         });
@@ -2322,15 +2334,15 @@ app.get('/node_redisONtt/mget/:key1/:key2/:key3', (req, res) => {
     let key2 = req.params.key2;
     let key3 = req.params.key3;
 
-    mgetAsync([key1, key2, key3])
-        .then((value) => {
-            res.send(value);
-        })
-        .catch((error) => {
-            console.error(error);
-            // Handle the error in a way that makes sense for your application
+    client.MGET([key1, key2, key3], (err, value) => {
+        if (err) {
+            // handle error here
+            console.error(err);
             res.status(500).send({error: "Error retrieving data from Redis"});
-        });
+            return;
+        }
+        res.send(value);
+    });
 });
 
 
