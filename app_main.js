@@ -3,13 +3,10 @@ console.log('here we are in the app as of 230522 at '+Date.now().toString() );
 const express = require('express');
 const app = express();
 const server = require("http").createServer(app);
-// const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origin : "*"} });
 const io = require("socket.io")(server, { pingTimeout: 10000, pingInterval: 25000, cors: { origin : "*", methods: ["GET","POST"], credentials: true} });
 
 io.on('error', (error) => { console.error('socket.io error:', error); });
-
-io.on('connection', (socket) => { console.log(socket.id) });
-console.log('is there a response from socket "connection"?');
+io.on('connection', (socket) => { console.log(socket.id) });                    //console.log('is there a response from socket "connection"?');
 
 const client = require('redis').createClient();                                 // ### redis setup ###
 
@@ -26,13 +23,27 @@ const pool_teachers_db = mysql.createPool({ connectionLimit : 100, host : 'local
 
 const nodemailer = require('nodemailer');                                       // ### email setup ###
 const fs = require('fs');
-const privateKey = fs.readFileSync('/home/teache13/keys/private-key.pem', 'utf8');
+// const privateKey = fs.readFileSync('/home/teache13/keys/private-key.pem', 'utf8');
+
+// const transporter = nodemailer.createTransport({
+//     host: 'mail.teachertables.com',
+//     port: 465, secure: true,
+//     auth: { user: 'teachertables@gmail.com', pass: 'RetirementPresent4May' },
+//     dkim: { domainName: 'teachertables.com', keySelector: 'teachertablesdkim1', privateKey: privateKey },
+//     name: 'teachertables.com'
+// });
+
 const transporter = nodemailer.createTransport({
-    host: 'mail.teachertables.com',
-    port: 465, secure: true,
-    auth: { user: 'admin@teachertables.com', pass: 'RetirementPresent4May' },
-    dkim: { domainName: 'teachertables.com', keySelector: 'teachertablesdkim1', privateKey: privateKey }
+    service: 'gmail',
+    auth: {
+        type: 'OAuth2',
+        user: 'teachertables@gmail.com',
+        clientId: '246911688108-6cc802hqct84v7rth8nl7q8lvut6l4u5.apps.googleusercontent.com',
+        clientSecret: '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',
+        refreshToken: '1//04-DmsXBQi2dyCgYIARAAGAQSNwF-L9Irz9tH_km3HqjfL19VNq5-cmxflk56QuGoLd-1_4N0Mqn7qUFmpKFGmlBpePuxap_6aKA',
+    },
 });
+
 
 app.set('view engine', 'ejs');
 app.use(express.static('public'));
@@ -69,7 +80,7 @@ io.on('connection', (socket) => { console.log('socket connection established in 
     });
     
     socket.on('link_user_to_teacher_via_gCode', (params, socketResp) => { let newArrayOfStudents;     let linkedTeachers;
-        client.get(params.gCode + '_teacher_details', (err, teacherDetails) => {
+        client.GET(params.gCode + '_teacher_details', (err, teacherDetails) => {
             if (err) {
                 // Handle the error here
                 console.error(err);
@@ -121,12 +132,13 @@ io.on('connection', (socket) => { console.log('socket connection established in 
 
     socket.on('link_newUser_to_parentTutor', (params, socketResp) => { // { "userRef":userRef,"userName":userName,"teacherRef":idKey,"teacherName":user, "arrayOfStudents":arrayOfStudents }
         let dateNow = Date.now().toString();
-        let newArrayOfStudents = params.arrayOfStudents+"|>|"+params.userRef+">"+params.userName+">N>none>N>none>N>none>"+dateNow+">"+dateNow+">"+dateNow+">Ungrouped";
+        let newArrayOfStudents = params.arrayOfStudents+"|>|"+params.userRef+">"+params.userName+">N>none>N>none>N>none>"+dateNow+">"+dateNow+">"+dateNow+">"+params.set_NewLevel;
         pool_teachers_db.query("UPDATE teacherID_"+params.teacherRef+" SET arrayOfStudents='"+newArrayOfStudents+"' WHERE ref='"+params.teacherRef+"'", params, (error, results, fields)=>{ 
             let pass_1 = params;
             let linkedTeachers = pass_1.teacherRef +"_"+ pass_1.teacherName;
-            pool_users_db.query("UPDATE userID_"+pass_1.userRef+"_activities SET activityNotes='"+linkedTeachers+"' WHERE activity='teacherCodes'", (error, results, fields)=>{ 
-                pool_users_db.query("INSERT INTO userID_"+pass_1.userRef+"_activities VALUES('"+pass_1.teacherRef+"_tasks','none','none','none', 'none,3,111,none,3,222,none,3,333,"+pass_1.teacherName+","+pass_1.teacherRef+","+dateNow+",0,0,0','0,0,0','none','none','aux_1','aux_2','teacherTasks')", (error, results, fields)=>{
+            pool_users_db.query("UPDATE userID_"+pass_1.userRef+"_activities SET activityNotes='"+linkedTeachers+"' WHERE activity='teacherCodes'", pass_1, (error, results, fields)=>{ 
+                let pass_2 = pass_1;
+                pool_users_db.query("INSERT INTO userID_"+pass_1.userRef+"_activities VALUES('"+pass_2.teacherRef+"_tasks','none','none','none', 'none,3,111,none,3,222,none,3,333,"+pass_1.teacherName+","+pass_1.teacherRef+","+dateNow+",0,0,0','0,0,0','none','none','"+pass_2.avatar+"','aux_2','teacherTasks')", (error, results, fields)=>{
                     socketResp('linkage_success');
                 });
             });
@@ -326,7 +338,7 @@ io.on('connection', (socket) => { console.log('socket connection established in 
             let gameCode = alpha[dig1]+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
 
             params.gameCode = gameCode;
-            client.get(gameCode + '_teacher_details', (err, results) => {
+            client.GET(gameCode + '_teacher_details', (err, results) => {
                 if (err) {
                     // Handle the error here
                     console.error(err);
@@ -520,7 +532,11 @@ io.on('connection', (socket) => { console.log('socket connection established in 
                                                     let teacherDetails = data[4];
                                                     let teacherID = teacherDetails.split('>>')[0];
 
-                                                    pool_teachers_db.query("UPDATE teacherID_"+teacherID+" SET lastGameResults='"+last_game_results+"', lastGameRankings='"+last_game_ranking+Date.now().toString()+"|NotAllocated' WHERE ref='"+teacherID+"'", (error, results, fields)=>{
+                                                    let allocateGame = 'NotAllocated_classG';
+                                                    if (gameCode[0] == 'c') { allocateGame = 'NotAllocated_groupG'}
+
+                                                    pool_teachers_db.query("UPDATE teacherID_"+teacherID+" SET lastGameResults='"+last_game_results+"', lastGameRankings='"+last_game_ranking+Date.now().toString()+"|"+allocateGame+"' WHERE ref='"+teacherID+"'", (error, results, fields)=>{
+                                                    // pool_teachers_db.query("UPDATE teacherID_"+teacherID+" SET lastGameResults='"+last_game_results+"', lastGameRankings='"+last_game_ranking+Date.now().toString()+"|NotAllocated' WHERE ref='"+teacherID+"'", (error, results, fields)=>{
                                                         client.SETEX(gameCode+'_game_status', 7200, game_status_finished, (error) => {
                                                             if (error) {
                                                                 // Handle the error
@@ -631,7 +647,7 @@ io.on('connection', (socket) => { console.log('socket connection established in 
 
     socket.on('reBoot_at_round_end', (gCode_Rnd) => { // reboot if no response after 63 sec game time
         
-        client.get(gCode + '_game_status', (err, game_status) => {
+        client.GET(gCode + '_game_status', (err, game_status) => {
                    if (err) {
                   // Handle the error here
                   console.error(err);
@@ -645,7 +661,7 @@ io.on('connection', (socket) => { console.log('socket connection established in 
         
                 let reBoot_atRoundEnd = false;
         
-                client.get(gCode + '_last_reBoot', (err, last_reBoot) => {
+                client.GET(gCode + '_last_reBoot', (err, last_reBoot) => {
                     if (err) {
                         // Handle the error here
                         console.error(err);
@@ -677,7 +693,7 @@ io.on('connection', (socket) => { console.log('socket connection established in 
 
         let reBoot_toStartGameAfterLoaded = false;
         
-        client.get(gCode + '_last_reBoot', (err, last_reBoot) => {
+        client.GET(gCode + '_last_reBoot', (err, last_reBoot) => {
             if (err) {
                 // Handle the error here
                 console.error(err);
@@ -729,7 +745,7 @@ io.on('connection', (socket) => { console.log('socket connection established in 
 
         let reBoot_after62secOfRunning = false;
 
-        client.get(gCode + '_last_reBoot', (err, last_reBoot) => {
+        client.GET(gCode + '_last_reBoot', (err, last_reBoot) => {
             if (err) {
                 // Handle the error here
                 console.error(err);
@@ -856,7 +872,7 @@ io.on('connection', (socket) => { console.log('socket connection established in 
     });
     ////////////////////////////////////////////////////////////////////////////
     socket.on('fetch_students_task_states', (ref_pushed,socketResp) => { 
-        pool_users_db.query("SELECT activityNotes FROM userID_"+ref_pushed+"_activities WHERE userName='teacherTasks'", ref_pushed, (error, results, fields)=>{ 
+        pool_users_db.query("SELECT activityNotes, user FROM userID_"+ref_pushed+"_activities WHERE userName='teacherTasks'", ref_pushed, (error, results, fields)=>{ 
             results.push(ref_pushed);  // push on in order to pass thru via socket
             socketResp(results);
         });
@@ -893,6 +909,10 @@ io.on('connection', (socket) => { console.log('socket connection established in 
     socket.on('update_taskDueDays', (task_due_days) => { ref = task_due_days.split('|>>|')[0];  taskDueDays = task_due_days.split('|>>|')[1]; // ref|>>|1|>|2|>|3
         pool_teachers_db.query("UPDATE teacherID_"+ref+" SET taskDueDays='"+taskDueDays+"' WHERE ref='"+ref+"'");
     });
+    ////////////////////////////////////////////////////////////////////////////
+    socket.on('update_student_avatar', (params) => { let userRef = params.userRef; let teacherRef = params.teacherRef; let avatar = params.avatar;
+        pool_users_db.query("UPDATE userID_"+userRef+"_activities SET user='"+avatar+"' WHERE activity='"+teacherRef+"_tasks'");
+    });    
     //##############################################################################################
     /////// ### following socket connection are from the teacher "student_tasks" page //////////////    
     socket.on('delete_single_student', (params,socketResp) => { 
@@ -1093,8 +1113,7 @@ socket.on('update_user_rankings', (gameRound_user_ranking) => {
                                                         pool_teachers_db.query("INSERT INTO teacherID_"+idKey+" (ref,userName,firstName,teacherName,classPW,gameCode,arrayOfStudents,registerDate,access,currentGame,game_1,game_2,game_3,game_4,game_5,game_6,game_7,game_8,game_9,game_10,game_11,taskDueDays,lastGameResults,lastGameRankings,maxStudentGroup,groupTitles,groupGames,aux_1,aux_2,aux_3) VALUES ('"+pass_4.idKey+"','"+pass_4.userName+"','"+pass_4.firstName+"','"+pass_4.teacherName+"','"+pass_4.classPW+"','none','S','"+Date.now().toString()+"','none','Year 4|&|add_2d_1d_no_regroup|&|sub_2d_1d_no_regrouping|&|doubles_10_to_20|&|tt_easy_click_answerTT5|&|operators_mixed','none','none','none','none','none','none','none','none','none','none','none','2|>|4|>|6','none','none','4','none','none','ax1','ax2','ax3')", pass_4, (error, results, fields)=>{
             
                                                             let email_address = pass_4.email;
-                                                            // let transporter = nodemailer.createTransport({ host:"mail.teachertables.com", port:465, secure:true, auth:{ user:'admin@teachertables.com', pass:'RetirementPresent4May', }, });
-                                                            const msg = { from:'"The Teacher Tables App" <admin@teachertables.com>', to:email_address,
+                                                            const msg = { from:'"The Teacher Tables App" <teachertables@gmail.com>', to:email_address,
                                                                 subject : 'your Teacher Tables keycode',
                                                                 text : 'Here is your Key Code',
             
@@ -1106,7 +1125,14 @@ socket.on('update_user_rankings', (gameRound_user_ranking) => {
                                                                         "Kind regards,<br>" +
                                                                         "<i>Russell and the Team</i></p></div>",
                                                             }
-                                                            const info = transporter.sendMail(msg);
+                                                                        transporter.sendMail(msg, (error, info) => {
+                                                                            if (error) {
+                                                                            iconsole.log('Error occurred while sending email: ', error);
+                                                                            i} else {
+                                                                                iconsole.log('Email sent successfully: ', info.response);
+                                                                                   i}
+                                                                                i});
+
                                                             socketResp(pass_4.idKey);
                                                         });
                                                     });
@@ -1137,8 +1163,7 @@ socket.on('update_user_rankings', (gameRound_user_ranking) => {
                 thisDate = thisDate[1]+' '+thisDate[2]+', '+thisDate[3];
                 
                 let email_address = thisTeacher.userEmail;
-                // let transporter = nodemailer.createTransport({ host:"mail.teachertables.com", port:465, secure:true, auth:{ user:'admin@teachertables.com', pass:'RetirementPresent4May', }, });
-                const msg = { from:'"Teacher Tables Admin" <admin@teachertables.com>', to:email_address,
+                const msg = { from:'"Teacher Tables Admin" <teachertables@gmail.com>', to:email_address,
                     subject : 'your Teacher Tables account details',
                     text : 'Here are your account details',
 
@@ -1151,8 +1176,14 @@ socket.on('update_user_rankings', (gameRound_user_ranking) => {
                             "Kind regards,<br>" +
                             "<i>Russell and the Team</i></p></div>",
                 }
-                const info = transporter.sendMail(msg);
-                socketResp(thisTeacher);
+                            transporter.sendMail(msg, (error, info) => {
+                             if (error) {
+                            iconsole.log('Error occurred while sending email: ', error);
+                             i} else {
+                            iconsole.log('Email sent successfully: ', info.response);
+                               i}
+                                  i});
+                                 socketResp(thisTeacher);
             });
         });
     });
@@ -1412,6 +1443,20 @@ app.get('/teacher/teacher_profile/:ref/:user', (req, res) => {  // res.send('tea
         res.render('teacher/teacher_profile', {ref:req.params.ref, user:req.params.user, userName:thisT.userName, userEmail:thisT.userEmail, teacherName:thisT.teacherName, password:thisT.userPassCode, expiryDate:thisT.expiryDate });
     });
 });
+
+////////////////////////////////////////////////////////////////////////////////
+app.get('/parent/subscribe/:country/:ref/:user', (req, res) => {  // res.send('teacher/student_profiles');
+
+    // pool_teachers_db.query("SELECT userName, userEmail, teacherName, userPassCode, expiryDate FROM aaaa_Data_Table_of_Teachers WHERE idKey='"+req.params.ref+"'", req.params, (error, results, fields)=>{
+    //     let thisT = results[0];
+    //     res.render('teacher/teacher_profile', {ref:req.params.ref, user:req.params.user, userName:thisT.userName, userEmail:thisT.userEmail, teacherName:thisT.teacherName, password:thisT.userPassCode, expiryDate:thisT.expiryDate });
+    // });
+    
+    res.render('parent/subscribe/'+req.params.country+'.ejs', {ref:req.params.ref, user:req.params.user });
+    
+});
+
+
 //////////teacher/footer_bttns//////////////////////////////////////////////////
 app.get('/teacher/teacher_faqs/:ref/:user', (req, res) => {             res.render('teacher/teacher_faqs', {ref:req.params.ref, user:req.params.user }); });
 app.get('/teacher/teacher_how_to_videos/:ref/:user', (req, res) => {    res.render('teacher/teacher_how_to_videos', {ref:req.params.ref, user:req.params.user }); });
@@ -1424,8 +1469,7 @@ app.get('/teacher_fetch/fetch_recovery_email/:recoveryEmail', (req, res) => {
     pool_teachers_db.query("SELECT userName, userEmail, teacherName, userPassCode, expiryDate FROM aaaa_Data_Table_of_Teachers WHERE userEmail='"+req.params.recoveryEmail+"'", req.params, (error, results, fields)=>{
         if (results.length !== 0) {
             
-            // let transporter = nodemailer.createTransport({ host:"mail.teachertables.com", port:465, secure:true, auth:{ user:'admin@teachertables.com', pass:'RetirementPresent4May', }, });
-            const msg = {   from    :'"The Teacher Tables App" <admin@teachertables.com>', 
+            const msg = {   from    :'"The Teacher Tables App" <teachertables@gmail.com>', 
                             to      :req.params.recoveryEmail,
                             subject :'your Teacher Tables accountt details',
                             text    :'Here are your account details',
@@ -1437,7 +1481,14 @@ app.get('/teacher_fetch/fetch_recovery_email/:recoveryEmail', (req, res) => {
                                         "Kind regards,<br>" +
                                         "<i>Russell and the Team</i></div>",
             }
-            const info = transporter.sendMail(msg);            
+            transporter.sendMail(msg, (error, info) => {
+        if (error) {
+        console.log('Error occurred while sending email: ', error);
+        } else {
+        console.log('Email sent successfully: ', info.response);
+        }
+        });
+            
 
             res.send('success');
         }
@@ -1491,7 +1542,7 @@ app.get('/submit_game_code/:ref/:user', (req, res) => { // this is route to dire
             if (results[0].gameCode == 'none') { res.render('submit_game_code', { ref:params.ref, user:params.user, teacherLinks:results[0].activityNotes, alert_gameCode:'' }); }
             else { 
                 // it goes here if student has already been logged in to game but got out BUT still has a recorded gameCode in their db.
-                client.get(results[0].gameCode + '_game_status', (err, gameStatus) => {
+                client.GET(results[0].gameCode + '_game_status', (err, gameStatus) => {
                     if (err) {
                         // Handle the error here
                         console.error(err);
@@ -1656,7 +1707,7 @@ app.get('/teacher/get_game_code/:ref/:user', (req, res) => { // res.send('in /te
                 let gameCode = alpha[dig1]+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
                 thisTeacher.gameCode = gameCode;
                     
-                client.get(gameCode + '_teacher_details', (err, isResults) => {
+                client.GET(gameCode + '_teacher_details', (err, isResults) => {
                     if (err) {
                         console.error(err);
                         return;
@@ -1751,7 +1802,7 @@ app.get('/teacher/get_group_games_code/:ref/:user', (req, res) => {
                 let gameCode = 'c'+alphaNum[dig2]+alphaNum[dig3]+alphaNum[dig4];
                 thisTeacher.gameCode = gameCode;
 
-                client.get(gameCode + '_teacher_details', (err, isResults) => {
+                client.GET(gameCode + '_teacher_details', (err, isResults) => {
                     if (err) {
                         console.error(err);
                         return;
@@ -1837,7 +1888,7 @@ function delete_game(params,path,res) {
             pool_teachers_db.query("DROP TABLE "+pass_1.gameCode, pass_1, (error, results, fields)=>{ 
                 let pass_2 = pass_1;
                 
-                client.get(pass_2.gameCode + '_linked_users', (err, linked_users) => {
+                client.GET(pass_2.gameCode + '_linked_users', (err, linked_users) => {
                     if (err) {
                         console.error(err);
                         return;
@@ -1851,7 +1902,7 @@ function delete_game(params,path,res) {
                     }
                     
                     let gC = pass_2.gameCode;
-                    client.del(gC+'_teacher_details', gC+'_linked_users', gC+'_user_results', gC+'_user_ranking', gC+'_game_status', gC+'_last_reBoot', (err) => {
+                    client.DEL(gC+'_teacher_details', gC+'_linked_users', gC+'_user_results', gC+'_user_ranking', gC+'_game_status', gC+'_last_reBoot', (err) => {
                         if (err) {
                             console.error(err);
                             return;
@@ -1859,92 +1910,14 @@ function delete_game(params,path,res) {
                         if( path == 'delete_game_redirect_to_myStudents') { res.redirect('/teacher/my_students/'+params.ref+'/post_game'); }
                         else { res.redirect('/teacher/'+pass_2.ref); }
                     });                    
-                    
-                    // if( path == 'delete_game_redirect_to_myStudents') { res.redirect('/teacher/my_students/'+params.ref+'/post_game'); }
-                    // else { res.redirect('/teacher/'+pass_2.ref); }                    
-                    
+
                 });
             });
         });
     });
 }
     
-    // pool_teachers_db.query("DROP TABLE sbbv", (error, results, fields)=>{ });
-    
-    // pool_teachers_db.query("SELECT teacherID FROM aaaa_List_of_gameCodes WHERE gameCode='"+params.gameCode+"'", params, (error, results, fields)=>{
-    //     if ( results.length === 0 ) { 
-    //         pool_teachers_db.query("UPDATE teacherID_"+params.ref+" SET gameCode='none' WHERE ref='"+params.ref+"'", params, (error, results, fields)=>{
-    //             res.redirect('/teacher/'+params.ref);
-    //         });
-    //     }
-    //     else {
-    //         pool_teachers_db.query("UPDATE teacherID_"+params.ref+" SET gameCode='none' WHERE ref='"+params.ref+"'", params, (error, results, fields)=>{
-    //             let pass = params;
-    //             pool_teachers_db.query("DELETE FROM aaaa_List_of_gameCodes WHERE gameCode='"+pass.gameCode+"'", pass, (error, results, fields)=>{
-    //                 let pass_1 = pass;
-                    
-    //                 client.GET(pass_1.gameCode+'_linked_users').then( (linked_users) => {
-    //                     if (linked_users !== '|') {
-    //                         let linkedUsers = linked_users.split('|');
-                            
-    //                         for (let n=1; n<(linkedUsers.length - 1); n++ ) { let user = linkedUsers[n].split('>')[0];
-    //                             pool_users_db.query("UPDATE userID_"+user+"_activities SET gameCode='none' WHERE activity='teacherCodes'");
-    //                         }
-    //                     }
-            
-    //                     client.SETEX(pass_1.gameCode+'_game_status', 7200, "deleted>>endGame").then( () => {
-    //                         if( path == 'delete_game_redirect_to_myStudents') { res.redirect('/teacher/my_students/'+params.ref+'/post_game'); }
-    //                         else { res.redirect('/teacher/'+params.ref); }
-    //                     });
-    //                 });
-                    
-    //             });
-    //         });
-    //     }
-    // });    
-// }
-
-//pool_users_db.query("DROP TABLE userID_"+pass_2.userRef+"_activities", pass_2, (err, results, fields)=>{
-
-// function delete_game(params,path,res) {
-    
-//     pool_teachers_db.query("DROP TABLE sbbv", (error, results, fields)=>{ });
-    
-//     pool_teachers_db.query("SELECT teacherID FROM aaaa_List_of_gameCodes WHERE gameCode='"+params.gameCode+"'", params, (error, results, fields)=>{
-//         if ( results.length === 0 ) { 
-//             pool_teachers_db.query("UPDATE teacherID_"+params.ref+" SET gameCode='none' WHERE ref='"+params.ref+"'", params, (error, results, fields)=>{
-//                 res.redirect('/teacher/'+params.ref);
-//             });
-//         }
-//         else {
-//             pool_teachers_db.query("UPDATE teacherID_"+params.ref+" SET gameCode='none' WHERE ref='"+params.ref+"'", params, (error, results, fields)=>{
-//                 let pass = params;
-//                 pool_teachers_db.query("DELETE FROM aaaa_List_of_gameCodes WHERE gameCode='"+pass.gameCode+"'", pass, (error, results, fields)=>{
-//                     let pass_1 = pass;
-                    
-//                     client.GET(pass_1.gameCode+'_linked_users').then( (linked_users) => {
-//                         if (linked_users !== '|') {
-//                             let linkedUsers = linked_users.split('|');
-                            
-//                             for (let n=1; n<(linkedUsers.length - 1); n++ ) { let user = linkedUsers[n].split('>')[0];
-//                                 pool_users_db.query("UPDATE userID_"+user+"_activities SET gameCode='none' WHERE activity='teacherCodes'");
-//                             }
-//                         }
-            
-//                         client.SETEX(pass_1.gameCode+'_game_status', 7200, "deleted>>endGame").then( () => {
-//                             if( path == 'delete_game_redirect_to_myStudents') { res.redirect('/teacher/my_students/'+params.ref+'/post_game'); }
-//                             else { res.redirect('/teacher/'+params.ref); }
-//                         });
-//                     });
-                    
-//                 });
-//             });
-//         }
-//     });    
-// }
-
 app.get('/teacher/delete_guest_game_via_click/:gameCode', (req, res) => { res.redirect('/teacher/nonMember'); });
-
 
 ////////////////////////////////////////////////////////////////////////////////
 /////////////  teacher_fetch ///////////////////////////////////////////////////
@@ -1984,7 +1957,7 @@ app.post('/link_user_to_gameCode/:ref/:user/:gameCode', (req, res) => { let para
             pool_users_db.query("UPDATE userID_"+params.ref+"_activities SET gameCode='"+params.gameCode+"' WHERE activity='teacherCodes'", params, (error, results, fields)=>{ 
                 let params_2 = params;
                 
-                client.get(params_2.gameCode + '_linked_users', (err, linked_users) => {
+                client.GET(params_2.gameCode + '_linked_users', (err, linked_users) => {
                     if (err) {
                         console.error(err);
                         return;
@@ -2031,7 +2004,7 @@ app.post('/link_user_to_gameCode/:ref/:user/:gameCode', (req, res) => { let para
 ////////////////////////////////////////////////////////////////////////////////
 app.post('/link_casual_user_to_gameCode', (req, res) => { // req.body = .ref, .user, .currentLinkedTeachers, .gameCode
 
-    client.get(req.body.gameCode + '_teacher_details', (err, results) => {
+    client.GET(req.body.gameCode + '_teacher_details', (err, results) => {
         if (err) {
             console.error(err);
             return;
@@ -2043,7 +2016,7 @@ app.post('/link_casual_user_to_gameCode', (req, res) => { // req.body = .ref, .u
         params.ref = params.gameCode + Math.floor(Math.random() * 9999).toString();  // else ref = logged-in idKey / ref
 
         let getUniqueRef = function(params) {
-            client.get(params.gameCode + '_linked_users', (err, linked_users) => {
+            client.GET(params.gameCode + '_linked_users', (err, linked_users) => {
                 if (err) {
                     console.error(err);
                     return;
@@ -2261,11 +2234,8 @@ app.get('/my_place/selected_scene/:ref/:scene', (req, res) => { // let params = 
 
 ////////////////////////////////////////////////////////////////////////////////
 app.get('/my_place_fetch/retrieve_scene_data/:scene', (req, res) => { // let params = req.params.getUrlStr.split('&');  // ref=member
-    let scene = req.params.scene;       
-    
-    // res.send('scene');
-    
-    pool_myplace_db.query("SELECT * FROM AWARDS_"+scene, (error, results, fields)=>{ res.json(results); });
+    // let scene = req.params.scene;
+    pool_myplace_db.query("SELECT * FROM AWARDS_"+req.params.scene, (error, results, fields)=>{ res.json(results); });
 });
 ////////////////////////////////////////////////////////////////////////////////
 app.get('/my_place_fetch/retrieve_user_details_and_imageIDs/:ref/:scene', (req, res) => { // let params = req.params.getUrlStr.split('&');  // ref=member&scene=scene
@@ -2304,8 +2274,26 @@ app.get('/my_place/change_scene/:ref/:user/:credit', (req, res) => { // let para
     res.render('my_place/select_poster', { ref: req.params.ref, user: req.params.user, credit: req.params.credit });
 });
 
+
+app.get('/node_mail', (req, res) => {
+    const mailThis = { 
+        from:   "teachertables@gmail.com",
+        to:     "info@mathsready.com.au",
+        subject:"Nodemailer Test from TT 1259",
+        text:   "This is a test from TT app 1259",
+        html:   "<b>Hello???</b>"
+    }
+    
+    transporter.sendMail(mailThis, (error, info) => { 
+        if (error) { 
+            res.send(error.toString() );
+        }
+        else { res.send('email send via node_mail 1259'); }
+    });
+});
+
 ////////////////////////////////////////////////////////////////////////////////
-////////////// REDIS ///////////////////////////////////////////////////////////
+////////////// REDIS DATA //////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 app.get('/node_redisONtt/set/:key/:value', (req,res) => {
     client.SETEX(req.params.key, 600, req.params.value, (error) => {
@@ -2319,7 +2307,7 @@ app.get('/node_redisONtt/set/:key/:value', (req,res) => {
 });
 
 app.get('/node_redisONtt/get/:key', (req,res) => {
-    client.get(req.params.key, (err, value) => {
+    client.GET(req.params.key, (err, value) => {
         if (err) {
             console.error(err);
             return;
@@ -2345,7 +2333,6 @@ app.get('/node_redisONtt/mget/:key1/:key2/:key3', (req, res) => {
     });
 });
 
-
 app.get('/node_redisONtt/append/:key/:value', (req,res) => {
     client.append(req.params.key, req.params.value, (err) => {
         if (err) {
@@ -2355,6 +2342,3 @@ app.get('/node_redisONtt/append/:key/:value', (req,res) => {
         res.send(req.params.key+' : '+req.params.value);
     });
 });
-
-
-console.log('here we are at END of app as of 230522 at '+Date.now().toString() );
